@@ -1,0 +1,41 @@
+{
+  "name": "minecraftServerManager",
+  "requirements": [
+    {
+      "key": "DATABASE_URL",
+      "type": "database",
+      "dbType": "postgres",
+      "description": "Prisma PostgreSQL Connection URL"
+    },
+    {
+      "key": "PORT",
+      "type": "credential",
+      "description": "Port the Next.js server listens on"
+    },
+    {
+      "key": "JWT_SECRET",
+      "type": "credential",
+      "description": "Secret key for signing JWT cookies (min 32 chars)"
+    },
+    {
+      "key": "DISCORD_CLIENT_ID",
+      "type": "credential",
+      "description": "Discord OAuth2 Client ID"
+    },
+    {
+      "key": "DISCORD_CLIENT_SECRET",
+      "type": "credential",
+      "description": "Discord OAuth2 Client Secret"
+    },
+    {
+      "key": "DISCORD_REDIRECT_URI",
+      "type": "credential",
+      "description": "Discord OAuth2 Redirect URI (e.g. http://localhost:3000/callback)"
+    },
+    {
+      "key": "MINECRAFT_SERVERS_DIR",
+      "type": "credential",
+      "description": "Directory where Minecraft Server files will be stored (default: ./servers)"
+    }
+  ]
+}

@@ -1,0 +1,46 @@
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+generator client {
+  provider = "prisma-client-js"
+}
+
+model User {
+  id        String   @id @default(uuid())
+  discordId String   @unique
+  username  String
+  avatar    String?
+  admin     Boolean  @default(false)
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+}
+
+model MinecraftServer {
+  id               String   @id @default(uuid())
+  name             String   @unique
+  port             Int      @default(25565)
+  memoryMin        String   @default("2048M")
+  memoryMax        String   @default("6144M")
+  jarFile          String   @default("server.jar")
+  opPlayer         String?  // OP player name
+  serverProperties String?  // server.properties content
+  createdAt        DateTime @default(now())
+  updatedAt        DateTime @updatedAt
+}
+
+model CurseForgeServer {
+  id               String   @id @default(uuid())
+  name             String   @unique
+  port             Int      @default(25565)
+  memoryMin        String   @default("2048M")
+  memoryMax        String   @default("6144M")
+  curseForgeZip    String?  // Name of uploaded zip file (e.g. modpack.zip)
+  startScript      String   @default("run.sh")
+  opPlayer         String?  // OP player name
+  serverProperties String?  // server.properties content
+  createdAt        DateTime @default(now())
+  updatedAt        DateTime @updatedAt
+}
+
