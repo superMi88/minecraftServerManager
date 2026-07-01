@@ -33,7 +33,7 @@ export default async function ServerConsolePage({ params }: { params: Params }) 
   }
 
   // Fetch the server details to ensure it exists
-  let server: any = await prisma.minecraftServer.findUnique({
+  let server: { name: string } | null = await prisma.minecraftServer.findUnique({
     where: { id },
   });
   let serverType = 'PAPER';

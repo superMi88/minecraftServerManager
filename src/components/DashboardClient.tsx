@@ -57,7 +57,6 @@ export default function DashboardClient({ user }: { user: User }) {
   const [jarUploadSuccess, setJarUploadSuccess] = useState<string | null>(null);
 
   // Fetch servers list
-  const [uploadsLoading, setUploadsLoading] = useState(false);
   const fetchServers = async () => {
     try {
       const res = await fetch('/api/servers');
@@ -89,8 +88,10 @@ export default function DashboardClient({ user }: { user: User }) {
   };
 
   useEffect(() => {
-    fetchServers();
-    fetchUploads();
+    Promise.resolve().then(() => {
+      fetchServers();
+      fetchUploads();
+    });
     
     // Poll servers status every 5 seconds to keep dashboard up to date
     const interval = setInterval(fetchServers, 5000);
@@ -191,7 +192,7 @@ export default function DashboardClient({ user }: { user: User }) {
       } else {
         setZipUploadError(data.error || 'Upload failed.');
       }
-    } catch (err) {
+    } catch {
       setZipUploadError('Network error uploading file.');
     } finally {
       setZipUploadLoading(false);
@@ -216,7 +217,7 @@ export default function DashboardClient({ user }: { user: User }) {
       } else {
         setJarUploadError(data.error || 'Upload failed.');
       }
-    } catch (err) {
+    } catch {
       setJarUploadError('Network error uploading file.');
     } finally {
       setJarUploadLoading(false);
@@ -252,6 +253,7 @@ export default function DashboardClient({ user }: { user: User }) {
         <div className="user-profile">
           <span style={{ fontWeight: 600 }}>{user.username}</span>
           {user.userId && user.avatar && (
+            // eslint-disable-next-line @next/next/no-img-element
             <img
               src={`https://cdn.discordapp.com/avatars/${user.userId}/${user.avatar}.webp`}
               className="avatar"

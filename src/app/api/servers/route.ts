@@ -22,9 +22,10 @@ export async function GET() {
     }));
 
     return NextResponse.json({ success: true, servers: serversWithStatus });
-  } catch (error: any) {
+  } catch (error) {
     console.error('Error fetching servers:', error);
-    return NextResponse.json({ success: false, error: error.message }, { status: 500 });
+    const message = error instanceof Error ? error.message : String(error);
+    return NextResponse.json({ success: false, error: message }, { status: 500 });
   }
 }
 
@@ -53,7 +54,15 @@ export async function POST(request: NextRequest) {
 
 
     // Create database entry based on type
-    let newServer: any;
+    let newServer: {
+      id: string;
+      name: string;
+      port: number;
+      memoryMin: string;
+      memoryMax: string;
+      type?: string;
+      opPlayer: string | null;
+    };
     if (type === 'PAPER') {
       newServer = await prisma.minecraftServer.create({
         data: {
@@ -145,15 +154,16 @@ export async function POST(request: NextRequest) {
               }
             }
           }
-        } catch (err: any) {
+        } catch (err) {
           console.error('Error extracting zip during server creation:', err);
         }
       }
     }
 
     return NextResponse.json({ success: true, server: newServer });
-  } catch (error: any) {
+  } catch (error) {
     console.error('Error creating server:', error);
-    return NextResponse.json({ success: false, error: error.message }, { status: 500 });
+    const message = error instanceof Error ? error.message : String(error);
+    return NextResponse.json({ success: false, error: message }, { status: 500 });
   }
 }

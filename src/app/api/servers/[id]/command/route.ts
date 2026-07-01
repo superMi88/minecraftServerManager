@@ -15,7 +15,8 @@ export async function POST(request: NextRequest, { params }: { params: Params })
 
     const result = sendCommand(id, command);
     return NextResponse.json(result);
-  } catch (error: any) {
-    return NextResponse.json({ success: false, error: error.message }, { status: 500 });
+  } catch (error) {
+    const message = error instanceof Error ? error.message : String(error);
+    return NextResponse.json({ success: false, error: message }, { status: 500 });
   }
 }

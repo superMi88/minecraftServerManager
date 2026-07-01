@@ -42,9 +42,10 @@ export async function GET() {
     const jars = readFilesFromDir(JARS_DIR, '.jar');
 
     return NextResponse.json({ success: true, zips, jars });
-  } catch (error: any) {
+  } catch (error) {
     console.error('Error fetching uploads:', error);
-    return NextResponse.json({ success: false, error: error.message }, { status: 500 });
+    const message = error instanceof Error ? error.message : String(error);
+    return NextResponse.json({ success: false, error: message }, { status: 500 });
   }
 }
 
@@ -84,9 +85,10 @@ export async function POST(request: NextRequest) {
       filename: sanitizedFilename,
       type: ext === '.zip' ? 'ZIP' : 'JAR',
     });
-  } catch (error: any) {
+  } catch (error) {
     console.error('Upload Error:', error);
-    return NextResponse.json({ success: false, error: error.message }, { status: 500 });
+    const message = error instanceof Error ? error.message : String(error);
+    return NextResponse.json({ success: false, error: message }, { status: 500 });
   }
 }
 
@@ -128,8 +130,9 @@ export async function DELETE(request: NextRequest) {
     fs.unlinkSync(filePath);
 
     return NextResponse.json({ success: true, message: `File "${filename}" deleted successfully.` });
-  } catch (error: any) {
+  } catch (error) {
     console.error('Delete Error:', error);
-    return NextResponse.json({ success: false, error: error.message }, { status: 500 });
+    const message = error instanceof Error ? error.message : String(error);
+    return NextResponse.json({ success: false, error: message }, { status: 500 });
   }
 }

@@ -37,8 +37,9 @@ export async function POST(request: NextRequest, { params }: { params: Params })
     } else {
       return NextResponse.json({ success: false, error: 'Invalid action. Supported: START, STOP, RESTART' }, { status: 400 });
     }
-  } catch (error: any) {
+  } catch (error) {
     console.error('Error controlling server:', error);
-    return NextResponse.json({ success: false, error: error.message }, { status: 500 });
+    const message = error instanceof Error ? error.message : String(error);
+    return NextResponse.json({ success: false, error: message }, { status: 500 });
   }
 }

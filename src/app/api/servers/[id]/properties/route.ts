@@ -9,7 +9,7 @@ type Params = Promise<{ id: string }>;
 export async function GET(request: NextRequest, { params }: { params: Params }) {
   try {
     const { id } = await params;
-    let server: any = await prisma.minecraftServer.findUnique({
+    let server: { port: number } | null = await prisma.minecraftServer.findUnique({
       where: { id },
     });
 
@@ -32,8 +32,9 @@ export async function GET(request: NextRequest, { params }: { params: Params }) 
 
     const content = fs.readFileSync(propertiesPath, 'utf-8');
     return NextResponse.json({ success: true, content });
-  } catch (error: any) {
-    return NextResponse.json({ success: false, error: error.message }, { status: 500 });
+  } catch (error) {
+    const message = error instanceof Error ? error.message : String(error);
+    return NextResponse.json({ success: false, error: message }, { status: 500 });
   }
 }
 
@@ -47,7 +48,7 @@ export async function POST(request: NextRequest, { params }: { params: Params })
       return NextResponse.json({ success: false, error: 'Content parameter is required.' }, { status: 400 });
     }
 
-    let server: any = await prisma.minecraftServer.findUnique({
+    let server: { id: string } | null = await prisma.minecraftServer.findUnique({
       where: { id },
     });
     let serverType = 'PAPER';
@@ -82,7 +83,8 @@ export async function POST(request: NextRequest, { params }: { params: Params })
     }
 
     return NextResponse.json({ success: true, message: 'server.properties saved successfully.' });
-  } catch (error: any) {
-    return NextResponse.json({ success: false, error: error.message }, { status: 500 });
+  } catch (error) {
+    const message = error instanceof Error ? error.message : String(error);
+    return NextResponse.json({ success: false, error: message }, { status: 500 });
   }
 }

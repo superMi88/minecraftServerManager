@@ -1,6 +1,6 @@
 'use client';
 
-import React, { useEffect, useState, useRef } from 'react';
+import React, { useEffect, useState, useRef, useCallback } from 'react';
 import { useRouter } from 'next/navigation';
 import Link from 'next/link';
 
@@ -91,7 +91,7 @@ export default function ServerConsoleClient({
   }, [logs]);
 
   // Fetch Server Metadata on load
-  const fetchMetadata = async () => {
+  const fetchMetadata = useCallback(async () => {
     try {
       const res = await fetch(`/api/servers/${serverId}`);
       const data = await res.json();
@@ -113,9 +113,9 @@ export default function ServerConsoleClient({
     } catch (err) {
       console.error('Failed to load server metadata', err);
     }
-  };
+  }, [serverId, selectedShFile]);
 
-  const fetchUploads = async () => {
+  const fetchUploads = useCallback(async () => {
     try {
       const res = await fetch('/api/uploads');
       const data = await res.json();
@@ -126,13 +126,15 @@ export default function ServerConsoleClient({
     } catch (err) {
       console.error('Failed to fetch uploads:', err);
     }
-  };
+  }, []);
 
   useEffect(() => {
-    fetchMetadata();
-  }, [serverId]);
+    Promise.resolve().then(() => {
+      fetchMetadata();
+    });
+  }, [fetchMetadata]);
 
-  const fetchBackups = async () => {
+  const fetchBackups = useCallback(async () => {
     setBackupsLoading(true);
     setBackupError(null);
     setBackupSuccess(null);
@@ -144,12 +146,12 @@ export default function ServerConsoleClient({
       } else {
         setBackupError(data.error || 'Failed to fetch backups.');
       }
-    } catch (err) {
+    } catch {
       setBackupError('Failed to load backups due to network error.');
     } finally {
       setBackupsLoading(false);
     }
-  };
+  }, [serverId]);
 
   const handleCreateBackup = async () => {
     if (isRunning) {
@@ -170,7 +172,7 @@ export default function ServerConsoleClient({
       } else {
         setBackupError(data.error || 'Failed to create backup.');
       }
-    } catch (err) {
+    } catch {
       setBackupError('Network error creating backup.');
     } finally {
       setBackupCreateLoading(false);
@@ -198,12 +200,14 @@ export default function ServerConsoleClient({
   };
 
   useEffect(() => {
-    if (activeTab === 'settings') {
-      fetchUploads();
-    } else if (activeTab === 'backups') {
-      fetchBackups();
-    }
-  }, [activeTab]);
+    Promise.resolve().then(() => {
+      if (activeTab === 'settings') {
+        fetchUploads();
+      } else if (activeTab === 'backups') {
+        fetchBackups();
+      }
+    });
+  }, [activeTab, fetchUploads, fetchBackups]);
 
   // Poll Logs / Status
   useEffect(() => {
@@ -235,29 +239,31 @@ export default function ServerConsoleClient({
   // Fetch Properties when switching to Properties tab
   useEffect(() => {
     if (activeTab === 'properties') {
-      setPropertiesLoading(true);
-      setPropertiesError(null);
-      setPropertiesSuccess(null);
-      
-      fetch(`/api/servers/${serverId}/properties`)
-        .then((res) => res.json())
-        .then((data) => {
-          if (data.success) {
-            setProperties(data.content);
-          } else {
-            setPropertiesError(data.error || 'properties failed to load');
-          }
-        })
-        .catch((err) => {
-          console.error(err);
-          setPropertiesError('Network error loading properties.');
-        })
-        .finally(() => setPropertiesLoading(false));
+      Promise.resolve().then(() => {
+        setPropertiesLoading(true);
+        setPropertiesError(null);
+        setPropertiesSuccess(null);
+        
+        fetch(`/api/servers/${serverId}/properties`)
+          .then((res) => res.json())
+          .then((data) => {
+            if (data.success) {
+              setProperties(data.content);
+            } else {
+              setPropertiesError(data.error || 'properties failed to load');
+            }
+          })
+          .catch((err) => {
+            console.error(err);
+            setPropertiesError('Network error loading properties.');
+          })
+          .finally(() => setPropertiesLoading(false));
+      });
     }
   }, [serverId, activeTab]);
 
   // Fetch Plugins when switching to Files tab (Paper only)
-  const fetchPlugins = async () => {
+  const fetchPlugins = useCallback(async () => {
     if (serverType !== 'PAPER') return;
     setPluginsLoading(true);
     try {
@@ -271,13 +277,15 @@ export default function ServerConsoleClient({
     } finally {
       setPluginsLoading(false);
     }
-  };
+  }, [serverId, serverType]);
 
   useEffect(() => {
     if (activeTab === 'files') {
-      fetchPlugins();
+      Promise.resolve().then(() => {
+        fetchPlugins();
+      });
     }
-  }, [serverId, activeTab, serverType]);
+  }, [activeTab, fetchPlugins]);
 
   // Server Control Action (START / STOP / RESTART)
   const handleControlAction = async (action: 'START' | 'STOP' | 'RESTART') => {
@@ -594,9 +602,9 @@ export default function ServerConsoleClient({
         </Link>
         <div className="user-profile">
           <span style={{ fontWeight: 600 }}>{user.username}</span>
-          <a href="/" className="btn btn-secondary" style={{ padding: '6px 12px', fontSize: '0.85rem' }}>
+          <Link href="/" className="btn btn-secondary" style={{ padding: '6px 12px', fontSize: '0.85rem' }}>
             Zurück
-          </a>
+          </Link>
         </div>
       </header>
 
@@ -744,7 +752,7 @@ export default function ServerConsoleClient({
 
                   <div style={{ color: 'var(--text-muted)', fontSize: '0.85rem' }}>
                     {serverType === 'PAPER' ? (
-                      <span>Lade Plugins (z.B. EssentialsX.jar) hoch. Wenn du die server.jar aktualisieren möchtest, lade eine Datei namens "server.jar" oder deine benutzerdefinierte JAR-Datei im Hauptverzeichnis hoch.</span>
+                      <span>Lade Plugins (z.B. EssentialsX.jar) hoch. Wenn du die server.jar aktualisieren möchtest, lade eine Datei namens &quot;server.jar&quot; oder deine benutzerdefinierte JAR-Datei im Hauptverzeichnis hoch.</span>
                     ) : (
                       <span>Lade die CurseForge Server Pack ZIP-Datei hoch. Der Inhalt wird automatisch im Serververzeichnis entpackt.</span>
                     )}
@@ -843,7 +851,7 @@ export default function ServerConsoleClient({
                 <div style={{ color: 'var(--text-muted)', textAlign: 'center', padding: '24px' }}>Lade Backups...</div>
               ) : backups.length === 0 ? (
                 <div className="card" style={{ color: 'var(--text-muted)', textAlign: 'center', padding: '32px', backgroundColor: 'var(--input-bg)' }}>
-                  Keine Backups vorhanden. Stoppe den Server und klicke oben auf "Backup erstellen".
+                  Keine Backups vorhanden. Stoppe den Server und klicke oben auf &quot;Backup erstellen&quot;.
                 </div>
               ) : (
                 <div style={{ display: 'flex', flexDirection: 'column', gap: '10px' }}>
@@ -1004,7 +1012,7 @@ export default function ServerConsoleClient({
                         )}
                       </select>
                       <p style={{ color: 'var(--text-muted)', fontSize: '0.8rem', marginTop: '6px' }}>
-                        Wähle das Skript aus, mit dem der Server gestartet wird, sobald du auf "Starten" klickst.
+                        Wähle das Skript aus, mit dem der Server gestartet wird, sobald du auf &quot;Starten&quot; klickst.
                       </p>
                     </div>
                   </>

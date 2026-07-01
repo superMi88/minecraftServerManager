@@ -35,9 +35,9 @@ export async function GET(request: NextRequest, { params }: { params: Params }) 
     const { id } = await params;
 
     // Check server existence
-    let server = await prisma.minecraftServer.findUnique({ where: { id } });
+    let server: { id: string; name: string } | null = await prisma.minecraftServer.findUnique({ where: { id } });
     if (!server) {
-      server = await prisma.curseForgeServer.findUnique({ where: { id } }) as any;
+      server = await prisma.curseForgeServer.findUnique({ where: { id } });
     }
     if (!server) {
       return NextResponse.json({ success: false, error: 'Server not found.' }, { status: 404 });
@@ -65,9 +65,10 @@ export async function GET(request: NextRequest, { params }: { params: Params }) 
       .sort((a, b) => b.createdAt.getTime() - a.createdAt.getTime());
 
     return NextResponse.json({ success: true, backups });
-  } catch (error: any) {
+  } catch (error) {
     console.error('Error fetching backups:', error);
-    return NextResponse.json({ success: false, error: error.message }, { status: 500 });
+    const message = error instanceof Error ? error.message : String(error);
+    return NextResponse.json({ success: false, error: message }, { status: 500 });
   }
 }
 
@@ -77,9 +78,9 @@ export async function POST(request: NextRequest, { params }: { params: Params })
     const { id } = await params;
 
     // Check server existence
-    let server = await prisma.minecraftServer.findUnique({ where: { id } });
+    let server: { id: string; name: string } | null = await prisma.minecraftServer.findUnique({ where: { id } });
     if (!server) {
-      server = await prisma.curseForgeServer.findUnique({ where: { id } }) as any;
+      server = await prisma.curseForgeServer.findUnique({ where: { id } });
     }
     if (!server) {
       return NextResponse.json({ success: false, error: 'Server not found.' }, { status: 404 });
@@ -124,9 +125,10 @@ export async function POST(request: NextRequest, { params }: { params: Params })
       const zip = new AdmZip();
       zip.addLocalFolder(worldPath);
       zip.writeZip(backupPath);
-    } catch (zipErr: any) {
+    } catch (zipErr) {
       console.error('Zip packing failed:', zipErr);
-      return NextResponse.json({ success: false, error: `Backup-Erstellung fehlgeschlagen: ${zipErr.message}` }, { status: 500 });
+      const message = zipErr instanceof Error ? zipErr.message : String(zipErr);
+      return NextResponse.json({ success: false, error: `Backup-Erstellung fehlgeschlagen: ${message}` }, { status: 500 });
     }
 
     return NextResponse.json({
@@ -138,9 +140,10 @@ export async function POST(request: NextRequest, { params }: { params: Params })
         createdAt: fs.statSync(backupPath).mtime,
       },
     });
-  } catch (error: any) {
+  } catch (error) {
     console.error('Error creating backup:', error);
-    return NextResponse.json({ success: false, error: error.message }, { status: 500 });
+    const message = error instanceof Error ? error.message : String(error);
+    return NextResponse.json({ success: false, error: message }, { status: 500 });
   }
 }
 
@@ -170,8 +173,9 @@ export async function DELETE(request: NextRequest, { params }: { params: Params 
     fs.unlinkSync(backupPath);
 
     return NextResponse.json({ success: true, message: `Backup "${filename}" erfolgreich gelöscht.` });
-  } catch (error: any) {
+  } catch (error) {
     console.error('Error deleting backup:', error);
-    return NextResponse.json({ success: false, error: error.message }, { status: 500 });
+    const message = error instanceof Error ? error.message : String(error);
+    return NextResponse.json({ success: false, error: message }, { status: 500 });
   }
 }

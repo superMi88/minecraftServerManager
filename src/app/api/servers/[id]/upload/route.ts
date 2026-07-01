@@ -10,7 +10,11 @@ type Params = Promise<{ id: string }>;
 export async function POST(request: NextRequest, { params }: { params: Params }) {
   try {
     const { id } = await params;
-    let server: any = await prisma.minecraftServer.findUnique({
+    let server: {
+      id: string;
+      jarFile?: string | null;
+      type?: string;
+    } | null = await prisma.minecraftServer.findUnique({
       where: { id },
     });
     let serverType = 'PAPER';
@@ -140,19 +144,21 @@ export async function POST(request: NextRequest, { params }: { params: Params })
         });
 
         return NextResponse.json({ success: true, message: 'CurseForge zip file successfully extracted.' });
-      } catch (err: any) {
+      } catch (err) {
         console.error('Error during zip extraction:', err);
         // Clean up zip if it exists
         if (fs.existsSync(zipPath)) {
           fs.unlinkSync(zipPath);
         }
-        return NextResponse.json({ success: false, error: `Unzipping failed: ${err.message}` }, { status: 500 });
+        const message = err instanceof Error ? err.message : String(err);
+        return NextResponse.json({ success: false, error: `Unzipping failed: ${message}` }, { status: 500 });
       }
     } else {
       return NextResponse.json({ success: false, error: 'Unknown server type.' }, { status: 400 });
     }
-  } catch (error: any) {
+  } catch (error) {
     console.error('Upload Error:', error);
-    return NextResponse.json({ success: false, error: error.message }, { status: 500 });
+    const message = error instanceof Error ? error.message : String(error);
+    return NextResponse.json({ success: false, error: message }, { status: 500 });
   }
 }

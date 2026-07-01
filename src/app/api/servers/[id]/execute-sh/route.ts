@@ -48,9 +48,10 @@ export async function POST(request: NextRequest, { params }: { params: Params })
     }
 
     return NextResponse.json({ success: true, message: 'Skript gestartet.' });
-  } catch (error: any) {
+  } catch (error) {
     console.error('Error starting script:', error);
-    return NextResponse.json({ success: false, error: error.message }, { status: 500 });
+    const message = error instanceof Error ? error.message : String(error);
+    return NextResponse.json({ success: false, error: message }, { status: 500 });
   }
 }
 
@@ -69,9 +70,10 @@ export async function GET(request: NextRequest, { params }: { params: Params }) 
       exitCode: running ? running.exitCode : null,
       logs: logs,
     });
-  } catch (error: any) {
+  } catch (error) {
     console.error('Error fetching script status:', error);
-    return NextResponse.json({ success: false, error: error.message }, { status: 500 });
+    const message = error instanceof Error ? error.message : String(error);
+    return NextResponse.json({ success: false, error: message }, { status: 500 });
   }
 }
 
@@ -92,9 +94,10 @@ export async function PUT(request: NextRequest, { params }: { params: Params }) 
     }
 
     return NextResponse.json({ success: true });
-  } catch (error: any) {
+  } catch (error) {
     console.error('Error sending input to script:', error);
-    return NextResponse.json({ success: false, error: error.message }, { status: 500 });
+    const message = error instanceof Error ? error.message : String(error);
+    return NextResponse.json({ success: false, error: message }, { status: 500 });
   }
 }
 
@@ -109,8 +112,9 @@ export async function DELETE(request: NextRequest, { params }: { params: Params 
     }
 
     return NextResponse.json({ success: true, message: 'Skript wurde abgebrochen.' });
-  } catch (error: any) {
+  } catch (error) {
     console.error('Error stopping script:', error);
-    return NextResponse.json({ success: false, error: error.message }, { status: 500 });
+    const message = error instanceof Error ? error.message : String(error);
+    return NextResponse.json({ success: false, error: message }, { status: 500 });
   }
 }

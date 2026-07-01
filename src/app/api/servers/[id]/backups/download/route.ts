@@ -37,8 +37,9 @@ export async function GET(request: NextRequest, { params }: { params: Params }) 
         'Content-Disposition': `attachment; filename="${filename}"`,
       },
     });
-  } catch (err: any) {
+  } catch (err) {
     console.error('Download error:', err);
-    return new Response(`Internal Server Error: ${err.message}`, { status: 500 });
+    const message = err instanceof Error ? err.message : String(err);
+    return new Response(`Internal Server Error: ${message}`, { status: 500 });
   }
 }

@@ -10,7 +10,18 @@ type Params = Promise<{ id: string }>;
 export async function GET(request: NextRequest, { params }: { params: Params }) {
   try {
     const { id } = await params;
-    let server: any = await prisma.minecraftServer.findUnique({
+    let server: {
+      id: string;
+      name: string;
+      port: number;
+      memoryMin: string;
+      memoryMax: string;
+      opPlayer: string | null;
+      serverProperties: string | null;
+      jarFile?: string | null;
+      curseForgeZip?: string | null;
+      startScript?: string;
+    } | null = await prisma.minecraftServer.findUnique({
       where: { id },
     });
     let serverType = 'PAPER';
@@ -48,15 +59,16 @@ export async function GET(request: NextRequest, { params }: { params: Params }) 
         availableShFiles,
       },
     });
-  } catch (error: any) {
-    return NextResponse.json({ success: false, error: error.message }, { status: 500 });
+  } catch (error) {
+    const message = error instanceof Error ? error.message : String(error);
+    return NextResponse.json({ success: false, error: message }, { status: 500 });
   }
 }
 
 export async function DELETE(request: NextRequest, { params }: { params: Params }) {
   try {
     const { id } = await params;
-    let server: any = await prisma.minecraftServer.findUnique({
+    let server: { id: string } | null = await prisma.minecraftServer.findUnique({
       where: { id },
     });
     let serverType = 'PAPER';
@@ -92,9 +104,10 @@ export async function DELETE(request: NextRequest, { params }: { params: Params 
     deleteServerFiles(id);
 
     return NextResponse.json({ success: true, message: 'Server deleted successfully.' });
-  } catch (error: any) {
+  } catch (error) {
     console.error('Error deleting server:', error);
-    return NextResponse.json({ success: false, error: error.message }, { status: 500 });
+    const message = error instanceof Error ? error.message : String(error);
+    return NextResponse.json({ success: false, error: message }, { status: 500 });
   }
 }
 
@@ -104,7 +117,10 @@ export async function PATCH(request: NextRequest, { params }: { params: Params }
     const body = await request.json();
     const { port, memoryMin, memoryMax, jarFile, opPlayer, curseForgeZip, startScript } = body;
 
-    let server: any = await prisma.minecraftServer.findUnique({
+    let server: {
+      id: string;
+      curseForgeZip?: string | null;
+    } | null = await prisma.minecraftServer.findUnique({
       where: { id },
     });
     let serverType = 'PAPER';
@@ -120,7 +136,15 @@ export async function PATCH(request: NextRequest, { params }: { params: Params }
       return NextResponse.json({ success: false, error: 'Server not found.' }, { status: 404 });
     }
 
-    const updateData: any = {};
+    const updateData: {
+      port?: number;
+      memoryMin?: string;
+      memoryMax?: string;
+      startScript?: string;
+      jarFile?: string;
+      curseForgeZip?: string | null;
+      opPlayer?: string | null;
+    } = {};
     if (port !== undefined) {
       const portInt = parseInt(port, 10);
       if (isNaN(portInt)) {
@@ -204,7 +228,7 @@ export async function PATCH(request: NextRequest, { params }: { params: Params }
                 }
               }
             }
-          } catch (err: any) {
+          } catch (err) {
             console.error('Error extracting zip during server patch:', err);
           }
         }
@@ -213,7 +237,19 @@ export async function PATCH(request: NextRequest, { params }: { params: Params }
 
     if (opPlayer !== undefined) updateData.opPlayer = opPlayer || null;
 
-    let updatedServer: any;
+    let updatedServer: {
+      id: string;
+      name: string;
+      port: number;
+      memoryMin: string;
+      memoryMax: string;
+      opPlayer: string | null;
+      serverProperties: string | null;
+      jarFile?: string | null;
+      curseForgeZip?: string | null;
+      startScript?: string;
+      type?: string;
+    };
     if (serverType === 'PAPER') {
       updatedServer = await prisma.minecraftServer.update({
         where: { id },
@@ -229,8 +265,9 @@ export async function PATCH(request: NextRequest, { params }: { params: Params }
     }
 
     return NextResponse.json({ success: true, server: updatedServer });
-  } catch (error: any) {
+  } catch (error) {
     console.error('Error updating server:', error);
-    return NextResponse.json({ success: false, error: error.message }, { status: 500 });
+    const message = error instanceof Error ? error.message : String(error);
+    return NextResponse.json({ success: false, error: message }, { status: 500 });
   }
 }

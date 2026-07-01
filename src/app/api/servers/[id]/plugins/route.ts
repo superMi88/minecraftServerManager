@@ -21,8 +21,9 @@ export async function GET(request: NextRequest, { params }: { params: Params }) 
     const jarFiles = files.filter((file) => file.toLowerCase().endsWith('.jar'));
 
     return NextResponse.json({ success: true, plugins: jarFiles });
-  } catch (error: any) {
-    return NextResponse.json({ success: false, error: error.message }, { status: 500 });
+  } catch (error) {
+    const message = error instanceof Error ? error.message : String(error);
+    return NextResponse.json({ success: false, error: message }, { status: 500 });
   }
 }
 
@@ -51,7 +52,8 @@ export async function DELETE(request: NextRequest, { params }: { params: Params 
     } else {
       return NextResponse.json({ success: false, error: 'Plugin file not found.' }, { status: 404 });
     }
-  } catch (error: any) {
-    return NextResponse.json({ success: false, error: error.message }, { status: 500 });
+  } catch (error) {
+    const message = error instanceof Error ? error.message : String(error);
+    return NextResponse.json({ success: false, error: message }, { status: 500 });
   }
 }

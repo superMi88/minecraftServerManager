@@ -6,14 +6,14 @@ import { useRouter, useSearchParams } from 'next/navigation';
 function CallbackContent() {
   const router = useRouter();
   const searchParams = useSearchParams();
-  const [error, setError] = useState<string | null>(null);
+  const [apiError, setApiError] = useState<string | null>(null);
+  const code = searchParams.get('code');
+  const error = !code ? 'OAuth code missing from redirect.' : apiError;
 
   useEffect(() => {
-    const code = searchParams.get('code');
     if (!code) {
-      setError('OAuth code missing from redirect.');
-      setTimeout(() => router.push('/login'), 3000);
-      return;
+      const timer = setTimeout(() => router.push('/login'), 3000);
+      return () => clearTimeout(timer);
     }
 
     async function exchangeCode() {
@@ -24,18 +24,18 @@ function CallbackContent() {
         if (res.ok && data.success) {
           router.push('/');
         } else {
-          setError(data.error || 'Authentication failed.');
+          setApiError(data.error || 'Authentication failed.');
           setTimeout(() => router.push('/login'), 4000);
         }
       } catch (err) {
         console.error(err);
-        setError('A network error occurred. Please try again.');
+        setApiError('A network error occurred. Please try again.');
         setTimeout(() => router.push('/login'), 4000);
       }
     }
 
     exchangeCode();
-  }, [searchParams, router]);
+  }, [code, router]);
 
   return (
     <div

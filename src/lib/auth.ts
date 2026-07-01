@@ -27,7 +27,7 @@ export async function verifyToken(token: string) {
       avatar: string | null;
       admin: boolean;
     };
-  } catch (error) {
+  } catch {
     return null;
   }
 }

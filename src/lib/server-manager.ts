@@ -125,7 +125,19 @@ eula=true`;
 }
 
 export async function startServer(serverId: string) {
-  let server: any = await prisma.minecraftServer.findUnique({
+  let server: {
+    id: string;
+    name: string;
+    port: number;
+    memoryMin: string;
+    memoryMax: string;
+    opPlayer: string | null;
+    serverProperties: string | null;
+    jarFile?: string | null;
+    curseForgeZip?: string | null;
+    startScript?: string;
+    type?: string;
+  } | null = await prisma.minecraftServer.findUnique({
     where: { id: serverId },
   });
   let serverType = 'PAPER';
@@ -314,7 +326,7 @@ export async function stopServer(serverId: string) {
           exec(`pkill -P ${pid}`, () => {
             try {
               process.kill(pid, 'SIGKILL');
-            } catch (err) {}
+            } catch {}
           });
         }
       }
@@ -342,7 +354,7 @@ export function sendCommand(serverId: string, command: string) {
     const folderPath = getServerFolderPath(serverId);
     logToFile(folderPath, `[Sent Command] ${command}\n`);
     return { success: true, message: 'Command sent.' };
-  } catch (e) {
+  } catch {
     return { success: false, message: 'Failed to write to stdin.' };
   }
 }
@@ -359,8 +371,9 @@ export function getConsoleLogs(serverId: string, limit = 60) {
     const content = fs.readFileSync(logFile, 'utf-8');
     const lines = content.split('\n');
     return lines.slice(-limit).join('\n');
-  } catch (err: any) {
-    return `Error reading log: ${err.message}`;
+  } catch (err) {
+    const message = err instanceof Error ? err.message : String(err);
+    return `Error reading log: ${message}`;
   }
 }
 
@@ -422,7 +435,7 @@ export async function startScriptProcess(serverId: string, scriptName: string) {
   if (!isWindows) {
     try {
       fs.chmodSync(scriptPath, '755');
-    } catch (err) {}
+    } catch {}
   }
 
   const command = isWindows ? 'bash' : '/bin/bash';
@@ -447,13 +460,13 @@ export async function startScriptProcess(serverId: string, scriptName: string) {
   scriptProcess.stdout?.on('data', (data) => {
     try {
       fs.appendFileSync(logFile, data.toString());
-    } catch (err) {}
+    } catch {}
   });
 
   scriptProcess.stderr?.on('data', (data) => {
     try {
       fs.appendFileSync(logFile, data.toString());
-    } catch (err) {}
+    } catch {}
   });
 
   scriptProcess.on('exit', (code) => {
@@ -461,7 +474,7 @@ export async function startScriptProcess(serverId: string, scriptName: string) {
     scriptObj.exitCode = code;
     try {
       fs.appendFileSync(logFile, `\n[System] Skript beendet mit Code: ${code}\n`);
-    } catch (err) {}
+    } catch {}
   });
 
   return { success: true, message: 'Skript gestartet.' };
@@ -478,7 +491,7 @@ export function sendScriptInput(serverId: string, input: string) {
     const logFile = getScriptConsoleLogPath(serverId);
     fs.appendFileSync(logFile, `[Eingabe] ${input}\n`);
     return { success: true };
-  } catch (err) {
+  } catch {
     return { success: false, message: 'Eingabe konnte nicht gesendet werden.' };
   }
 }
@@ -499,13 +512,13 @@ export function stopScriptProcess(serverId: string) {
         running.process.kill('SIGKILL');
       }
     }
-  } catch (err) {}
+  } catch {}
 
   runningScripts.delete(serverId);
   const logFile = getScriptConsoleLogPath(serverId);
   try {
     fs.appendFileSync(logFile, `\n[System] Skript vom Benutzer abgebrochen.\n`);
-  } catch (err) {}
+  } catch {}
 
   return { success: true, message: 'Skript abgebrochen.' };
 }
@@ -517,7 +530,7 @@ export function getScriptConsoleLog(serverId: string) {
   }
   try {
     return fs.readFileSync(logFile, 'utf-8');
-  } catch (err) {
+  } catch {
     return 'Fehler beim Lesen der Log-Datei.';
   }
 }
