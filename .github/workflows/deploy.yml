@@ -78,13 +78,27 @@ jobs:
               git reset --hard origin/main
             fi
 
-            # Create .env if it does not exist
-            if [ ! -f ".env" ]; then
+            # Verify DATABASE_URL exists (either in existing .env or in secrets)
+            if [ -f ".env" ]; then
+              if ! grep -q "^DATABASE_URL=.\+" .env; then
+                echo "ERROR: DATABASE_URL is empty in the existing .env file on the server!"
+                exit 1
+              fi
+            else
               echo "Erstelle .env Datei auf dem Server..."
+              DATABASE_URL_VAL="${{ secrets.DATABASE_URL }}"
+              if [ -z "$DATABASE_URL_VAL" ]; then
+                echo "=========================================================================="
+                echo "ERROR: The secrets.DATABASE_URL secret is not set in your GitHub repository!"
+                echo "Please add DATABASE_URL under: Settings -> Secrets and variables -> Actions"
+                echo "=========================================================================="
+                exit 1
+              fi
+              
               RANDOM_SECRET=$(openssl rand -hex 32 2>/dev/null || echo "fallback-secret-phrase-that-is-at-least-32-chars-long")
               
               echo "PORT=${{ secrets.PORT || 3000 }}" > .env
-              echo "DATABASE_URL=${{ secrets.DATABASE_URL }}" >> .env
+              echo "DATABASE_URL=$DATABASE_URL_VAL" >> .env
               echo "JWT_SECRET=$RANDOM_SECRET" >> .env
               echo "DISCORD_CLIENT_ID=${{ secrets.DISCORD_CLIENT_ID }}" >> .env
               echo "DISCORD_CLIENT_SECRET=${{ secrets.DISCORD_CLIENT_SECRET }}" >> .env
