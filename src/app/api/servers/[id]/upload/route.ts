@@ -39,122 +39,245 @@ export async function POST(request: NextRequest, { params }: { params: Params })
       return NextResponse.json({ success: false, error: 'No file uploaded.' }, { status: 400 });
     }
 
-    const bytes = await file.arrayBuffer();
-    const buffer = Buffer.from(bytes);
+    const chunkIndexStr = formData.get('chunkIndex') as string | null;
+    const totalChunksStr = formData.get('totalChunks') as string | null;
+    const originalName = formData.get('originalName') as string | null;
 
+    const isChunked = chunkIndexStr !== null && totalChunksStr !== null && originalName !== null;
     const serverFolder = getServerFolderPath(id);
 
-    if (server.type === 'PAPER') {
-      // For Paper, we can upload plugins (.jar files) or the server jar itself (.jar files to root)
-      const filename = file.name;
-      
-      // If it's the server.jar itself
-      if (filename.toLowerCase() === 'server.jar' || filename === server.jarFile) {
-        const filePath = path.join(serverFolder, filename);
-        fs.writeFileSync(filePath, buffer);
-        
-        // Update DB
-        await prisma.minecraftServer.update({
-          where: { id },
-          data: { jarFile: filename },
-        });
+    if (isChunked) {
+      const chunkIndex = parseInt(chunkIndexStr!, 10);
+      const totalChunks = parseInt(totalChunksStr!, 10);
+      const filename = path.basename(originalName!);
 
-        return NextResponse.json({ success: true, message: `Server JAR "${filename}" uploaded successfully.` });
-      } else {
-        // Otherwise, it's a plugin JAR
-        if (!filename.toLowerCase().endsWith('.jar')) {
-          return NextResponse.json({ success: false, error: 'Only .jar files are allowed for Paper Minecraft.' }, { status: 400 });
+      const tmpDirName = `tmp_upload_${filename}`;
+      const tmpDirPath = path.join(serverFolder, tmpDirName);
+
+      if (chunkIndex === 0) {
+        if (fs.existsSync(tmpDirPath)) {
+          fs.rmSync(tmpDirPath, { recursive: true, force: true });
         }
-        
-        const pluginsFolder = path.join(serverFolder, 'plugins');
-        if (!fs.existsSync(pluginsFolder)) {
-          fs.mkdirSync(pluginsFolder, { recursive: true });
-        }
-
-        const filePath = path.join(pluginsFolder, filename);
-        fs.writeFileSync(filePath, buffer);
-
-        return NextResponse.json({ success: true, message: `Plugin "${filename}" uploaded successfully.` });
-      }
-    } else if (server.type === 'CURSEFORGE') {
-      // For CurseForge, we expect a ZIP file containing the server pack
-      const filename = file.name;
-      if (!filename.toLowerCase().endsWith('.zip')) {
-        return NextResponse.json({ success: false, error: 'Only .zip files are allowed for CurseForge.' }, { status: 400 });
+        fs.mkdirSync(tmpDirPath, { recursive: true });
+      } else if (!fs.existsSync(tmpDirPath)) {
+        return NextResponse.json({ success: false, error: 'Upload session not found. Please restart.' }, { status: 400 });
       }
 
-      const zipPath = path.join(serverFolder, filename);
-      fs.writeFileSync(zipPath, buffer);
+      const bytes = await file.arrayBuffer();
+      const buffer = Buffer.from(bytes);
+      const chunkPath = path.join(tmpDirPath, `part_${chunkIndex}`);
+      fs.writeFileSync(chunkPath, buffer);
 
-      // Now extract the ZIP file
-      console.log(`Extracting CurseForge zip file to ${serverFolder}...`);
-      
-      try {
-        const directory = await unzipper.Open.file(zipPath);
-        const entries = directory.files;
-
-        if (entries.length === 0) {
-          throw new Error('ZIP file is empty.');
-        }
-
-        // Find if there's a common root folder in the zip file
-        const firstEntryPath = entries[0].path;
-        const rootFolder = firstEntryPath.split('/')[0];
-        
-        let allHaveCommonRoot = true;
-        for (const entry of entries) {
-          if (!entry.path.startsWith(rootFolder + '/') && entry.path !== rootFolder) {
-            allHaveCommonRoot = false;
-            break;
-          }
-        }
-
-        // Extract each entry
-        for (const entry of entries) {
-          let relativePath = entry.path;
-          if (allHaveCommonRoot && relativePath.startsWith(rootFolder + '/')) {
-            relativePath = relativePath.slice(rootFolder.length + 1);
-          }
-          
-          if (!relativePath) continue;
-
-          const fullPath = path.join(serverFolder, relativePath);
-
-          if (entry.type === 'Directory') {
-            fs.mkdirSync(fullPath, { recursive: true });
+      if (chunkIndex + 1 === totalChunks) {
+        let finalPath = '';
+        if (server.type === 'PAPER') {
+          if (filename.toLowerCase() === 'server.jar' || filename === server.jarFile) {
+            finalPath = path.join(serverFolder, filename);
           } else {
-            fs.mkdirSync(path.dirname(fullPath), { recursive: true });
-            
-            await new Promise<void>((resolve, reject) => {
-              entry.stream()
-                .pipe(fs.createWriteStream(fullPath))
-                .on('finish', resolve)
-                .on('error', reject);
+            if (!filename.toLowerCase().endsWith('.jar')) {
+              fs.rmSync(tmpDirPath, { recursive: true, force: true });
+              return NextResponse.json({ success: false, error: 'Only .jar files are allowed for Paper Minecraft.' }, { status: 400 });
+            }
+            const pluginsFolder = path.join(serverFolder, 'plugins');
+            if (!fs.existsSync(pluginsFolder)) {
+              fs.mkdirSync(pluginsFolder, { recursive: true });
+            }
+            finalPath = path.join(pluginsFolder, filename);
+          }
+        } else if (server.type === 'CURSEFORGE') {
+          if (!filename.toLowerCase().endsWith('.zip')) {
+            fs.rmSync(tmpDirPath, { recursive: true, force: true });
+            return NextResponse.json({ success: false, error: 'Only .zip files are allowed for CurseForge.' }, { status: 400 });
+          }
+          finalPath = path.join(serverFolder, filename);
+        } else {
+          fs.rmSync(tmpDirPath, { recursive: true, force: true });
+          return NextResponse.json({ success: false, error: 'Unknown server type.' }, { status: 400 });
+        }
+
+        if (fs.existsSync(finalPath)) {
+          fs.unlinkSync(finalPath);
+        }
+
+        for (let i = 0; i < totalChunks; i++) {
+          const partPath = path.join(tmpDirPath, `part_${i}`);
+          if (!fs.existsSync(partPath)) {
+            throw new Error(`Missing chunk part ${i}`);
+          }
+          const chunkData = fs.readFileSync(partPath);
+          fs.appendFileSync(finalPath, chunkData);
+        }
+
+        // Clean up tmp directory
+        fs.rmSync(tmpDirPath, { recursive: true, force: true });
+
+        // Post-processing
+        if (server.type === 'PAPER') {
+          if (filename.toLowerCase() === 'server.jar' || filename === server.jarFile) {
+            // Update DB
+            await prisma.minecraftServer.update({
+              where: { id },
+              data: { jarFile: filename },
             });
+            return NextResponse.json({ success: true, message: `Server JAR "${filename}" uploaded successfully.` });
+          } else {
+            return NextResponse.json({ success: true, message: `Plugin "${filename}" uploaded successfully.` });
+          }
+        } else if (server.type === 'CURSEFORGE') {
+          // Extract zip logic (reused)
+          console.log(`Extracting CurseForge zip file to ${serverFolder}...`);
+          try {
+            const directory = await unzipper.Open.file(finalPath);
+            const entries = directory.files;
+
+            if (entries.length === 0) {
+              throw new Error('ZIP file is empty.');
+            }
+
+            const firstEntryPath = entries[0].path;
+            const rootFolder = firstEntryPath.split('/')[0];
+            
+            let allHaveCommonRoot = true;
+            for (const entry of entries) {
+              if (!entry.path.startsWith(rootFolder + '/') && entry.path !== rootFolder) {
+                allHaveCommonRoot = false;
+                break;
+              }
+            }
+
+            for (const entry of entries) {
+              let relativePath = entry.path;
+              if (allHaveCommonRoot && relativePath.startsWith(rootFolder + '/')) {
+                relativePath = relativePath.slice(rootFolder.length + 1);
+              }
+              
+              if (!relativePath) continue;
+
+              const fullPath = path.join(serverFolder, relativePath);
+
+              if (entry.type === 'Directory') {
+                fs.mkdirSync(fullPath, { recursive: true });
+              } else {
+                fs.mkdirSync(path.dirname(fullPath), { recursive: true });
+                
+                await new Promise<void>((resolve, reject) => {
+                  entry.stream()
+                    .pipe(fs.createWriteStream(fullPath))
+                    .on('finish', resolve)
+                    .on('error', reject);
+                });
+              }
+            }
+
+            fs.unlinkSync(finalPath);
+
+            await prisma.curseForgeServer.update({
+              where: { id },
+              data: { curseForgeZip: filename },
+            });
+
+            return NextResponse.json({ success: true, message: 'CurseForge zip file successfully extracted.' });
+          } catch (err) {
+            console.error('Error during zip extraction:', err);
+            if (fs.existsSync(finalPath)) {
+              fs.unlinkSync(finalPath);
+            }
+            const message = err instanceof Error ? err.message : String(err);
+            return NextResponse.json({ success: false, error: `Unzipping failed: ${message}` }, { status: 500 });
           }
         }
-
-        // Delete the temporary zip file
-        fs.unlinkSync(zipPath);
-
-        // Update DB
-        await prisma.curseForgeServer.update({
-          where: { id },
-          data: { curseForgeZip: filename },
-        });
-
-        return NextResponse.json({ success: true, message: 'CurseForge zip file successfully extracted.' });
-      } catch (err) {
-        console.error('Error during zip extraction:', err);
-        // Clean up zip if it exists
-        if (fs.existsSync(zipPath)) {
-          fs.unlinkSync(zipPath);
-        }
-        const message = err instanceof Error ? err.message : String(err);
-        return NextResponse.json({ success: false, error: `Unzipping failed: ${message}` }, { status: 500 });
       }
+
+      return NextResponse.json({
+        success: true,
+        message: `Chunk ${chunkIndex + 1}/${totalChunks} received.`,
+      });
     } else {
-      return NextResponse.json({ success: false, error: 'Unknown server type.' }, { status: 400 });
+      // Standard single-file upload path
+      const bytes = await file.arrayBuffer();
+      const buffer = Buffer.from(bytes);
+
+      if (server.type === 'PAPER') {
+        const filename = file.name;
+        if (filename.toLowerCase() === 'server.jar' || filename === server.jarFile) {
+          const filePath = path.join(serverFolder, filename);
+          fs.writeFileSync(filePath, buffer);
+          await prisma.minecraftServer.update({
+            where: { id },
+            data: { jarFile: filename },
+          });
+          return NextResponse.json({ success: true, message: `Server JAR "${filename}" uploaded successfully.` });
+        } else {
+          if (!filename.toLowerCase().endsWith('.jar')) {
+            return NextResponse.json({ success: false, error: 'Only .jar files are allowed for Paper Minecraft.' }, { status: 400 });
+          }
+          const pluginsFolder = path.join(serverFolder, 'plugins');
+          if (!fs.existsSync(pluginsFolder)) {
+            fs.mkdirSync(pluginsFolder, { recursive: true });
+          }
+          const filePath = path.join(pluginsFolder, filename);
+          fs.writeFileSync(filePath, buffer);
+          return NextResponse.json({ success: true, message: `Plugin "${filename}" uploaded successfully.` });
+        }
+      } else if (server.type === 'CURSEFORGE') {
+        const filename = file.name;
+        if (!filename.toLowerCase().endsWith('.zip')) {
+          return NextResponse.json({ success: false, error: 'Only .zip files are allowed for CurseForge.' }, { status: 400 });
+        }
+        const zipPath = path.join(serverFolder, filename);
+        fs.writeFileSync(zipPath, buffer);
+        console.log(`Extracting CurseForge zip file to ${serverFolder}...`);
+        try {
+          const directory = await unzipper.Open.file(zipPath);
+          const entries = directory.files;
+          if (entries.length === 0) {
+            throw new Error('ZIP file is empty.');
+          }
+          const firstEntryPath = entries[0].path;
+          const rootFolder = firstEntryPath.split('/')[0];
+          let allHaveCommonRoot = true;
+          for (const entry of entries) {
+            if (!entry.path.startsWith(rootFolder + '/') && entry.path !== rootFolder) {
+              allHaveCommonRoot = false;
+              break;
+            }
+          }
+          for (const entry of entries) {
+            let relativePath = entry.path;
+            if (allHaveCommonRoot && relativePath.startsWith(rootFolder + '/')) {
+              relativePath = relativePath.slice(rootFolder.length + 1);
+            }
+            if (!relativePath) continue;
+            const fullPath = path.join(serverFolder, relativePath);
+            if (entry.type === 'Directory') {
+              fs.mkdirSync(fullPath, { recursive: true });
+            } else {
+              fs.mkdirSync(path.dirname(fullPath), { recursive: true });
+              await new Promise<void>((resolve, reject) => {
+                entry.stream()
+                  .pipe(fs.createWriteStream(fullPath))
+                  .on('finish', resolve)
+                  .on('error', reject);
+              });
+            }
+          }
+          fs.unlinkSync(zipPath);
+          await prisma.curseForgeServer.update({
+            where: { id },
+            data: { curseForgeZip: filename },
+          });
+          return NextResponse.json({ success: true, message: 'CurseForge zip file successfully extracted.' });
+        } catch (err) {
+          console.error('Error during zip extraction:', err);
+          if (fs.existsSync(zipPath)) {
+            fs.unlinkSync(zipPath);
+          }
+          const message = err instanceof Error ? err.message : String(err);
+          return NextResponse.json({ success: false, error: `Unzipping failed: ${message}` }, { status: 500 });
+        }
+      } else {
+        return NextResponse.json({ success: false, error: 'Unknown server type.' }, { status: 400 });
+      }
     }
   } catch (error) {
     console.error('Upload Error:', error);

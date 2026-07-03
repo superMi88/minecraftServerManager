@@ -18,6 +18,43 @@ interface ServerConsoleClientProps {
   user: User;
 }
 
+const uploadInChunks = async (
+  file: File,
+  url: string,
+  onProgress: (progress: number) => void,
+  chunkSize: number = 2 * 1024 * 1024 // 2MB chunks
+) => {
+  const totalChunks = Math.ceil(file.size / chunkSize);
+  for (let index = 0; index < totalChunks; index++) {
+    const start = index * chunkSize;
+    const end = Math.min(start + chunkSize, file.size);
+    const chunk = file.slice(start, end);
+    
+    const formData = new FormData();
+    formData.append('file', chunk);
+    formData.append('chunkIndex', index.toString());
+    formData.append('totalChunks', totalChunks.toString());
+    formData.append('originalName', file.name);
+
+    const res = await fetch(url, {
+      method: 'POST',
+      body: formData,
+    });
+
+    if (!res.ok) {
+      const data = await res.json().catch(() => ({}));
+      throw new Error(data.error || `Chunk ${index + 1}/${totalChunks} upload failed.`);
+    }
+
+    const data = await res.json();
+    if (!data.success) {
+      throw new Error(data.error || `Chunk ${index + 1}/${totalChunks} upload failed.`);
+    }
+
+    onProgress(Math.round(((index + 1) / totalChunks) * 100));
+  }
+};
+
 export default function ServerConsoleClient({
   serverId,
   initialServerName,
@@ -48,6 +85,7 @@ export default function ServerConsoleClient({
   const [uploadLoading, setUploadLoading] = useState(false);
   const [uploadError, setUploadError] = useState<string | null>(null);
   const [uploadSuccess, setUploadSuccess] = useState<string | null>(null);
+  const [uploadProgress, setUploadProgress] = useState<number | null>(null);
   
   // Settings tab states
   const [name, setName] = useState(initialServerName);
@@ -371,31 +409,22 @@ export default function ServerConsoleClient({
     setUploadLoading(true);
     setUploadError(null);
     setUploadSuccess(null);
-
-    const formData = new FormData();
-    formData.append('file', uploadFile);
+    setUploadProgress(0);
 
     try {
-      const res = await fetch(`/api/servers/${serverId}/upload`, {
-        method: 'POST',
-        body: formData,
-      });
-      const data = await res.json();
-
-      if (res.ok && data.success) {
-        setUploadSuccess(data.message || 'Datei erfolgreich hochgeladen!');
-        setUploadFile(null);
-        // Refresh file listings
-        fetchPlugins();
-        fetchMetadata();
-      } else {
-        setUploadError(data.error || 'Upload failed.');
-      }
+      await uploadInChunks(uploadFile, `/api/servers/${serverId}/upload`, setUploadProgress);
+      setUploadSuccess(`Datei "${uploadFile.name}" erfolgreich hochgeladen.`);
+      setUploadFile(null);
+      // Refresh file listings
+      fetchPlugins();
+      fetchMetadata();
     } catch (err) {
       console.error(err);
-      setUploadError('Network error uploading file.');
+      const message = err instanceof Error ? err.message : 'Netzwerkfehler beim Hochladen.';
+      setUploadError(message);
     } finally {
       setUploadLoading(false);
+      setUploadProgress(null);
     }
   };
 
@@ -758,8 +787,20 @@ export default function ServerConsoleClient({
                     )}
                   </div>
 
+                  {uploadProgress !== null && (
+                    <div style={{ width: '100%', display: 'flex', flexDirection: 'column', gap: '4px' }}>
+                      <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: '0.8rem', color: 'var(--text-muted)' }}>
+                        <span>Lade hoch...</span>
+                        <span>{uploadProgress}%</span>
+                      </div>
+                      <div style={{ width: '100%', backgroundColor: 'rgba(255, 255, 255, 0.1)', borderRadius: '4px', height: '8px', overflow: 'hidden' }}>
+                        <div style={{ width: `${uploadProgress}%`, height: '100%', backgroundColor: 'var(--primary)', transition: 'width 0.1s ease-in-out' }} />
+                      </div>
+                    </div>
+                  )}
+
                   <button type="submit" className="btn btn-primary" disabled={!uploadFile || uploadLoading}>
-                    {uploadLoading ? 'Lade hoch...' : 'Hochladen starten'}
+                    {uploadLoading ? `Lade hoch... ${uploadProgress !== null ? `${uploadProgress}%` : ''}` : 'Hochladen starten'}
                   </button>
                 </form>
               </div>

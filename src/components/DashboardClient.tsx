@@ -23,6 +23,43 @@ interface Server {
   createdAt: string;
 }
 
+const uploadInChunks = async (
+  file: File,
+  url: string,
+  onProgress: (progress: number) => void,
+  chunkSize: number = 2 * 1024 * 1024 // 2MB chunks
+) => {
+  const totalChunks = Math.ceil(file.size / chunkSize);
+  for (let index = 0; index < totalChunks; index++) {
+    const start = index * chunkSize;
+    const end = Math.min(start + chunkSize, file.size);
+    const chunk = file.slice(start, end);
+    
+    const formData = new FormData();
+    formData.append('file', chunk);
+    formData.append('chunkIndex', index.toString());
+    formData.append('totalChunks', totalChunks.toString());
+    formData.append('originalName', file.name);
+
+    const res = await fetch(url, {
+      method: 'POST',
+      body: formData,
+    });
+
+    if (!res.ok) {
+      const data = await res.json().catch(() => ({}));
+      throw new Error(data.error || `Chunk ${index + 1}/${totalChunks} upload failed.`);
+    }
+
+    const data = await res.json();
+    if (!data.success) {
+      throw new Error(data.error || `Chunk ${index + 1}/${totalChunks} upload failed.`);
+    }
+
+    onProgress(Math.round(((index + 1) / totalChunks) * 100));
+  }
+};
+
 export default function DashboardClient({ user }: { user: User }) {
   const [servers, setServers] = useState<Server[]>([]);
   const [loading, setLoading] = useState(true);
@@ -50,11 +87,13 @@ export default function DashboardClient({ user }: { user: User }) {
   const [zipUploadLoading, setZipUploadLoading] = useState(false);
   const [zipUploadError, setZipUploadError] = useState<string | null>(null);
   const [zipUploadSuccess, setZipUploadSuccess] = useState<string | null>(null);
+  const [zipUploadProgress, setZipUploadProgress] = useState<number | null>(null);
 
   const [jarUploadFile, setJarUploadFile] = useState<File | null>(null);
   const [jarUploadLoading, setJarUploadLoading] = useState(false);
   const [jarUploadError, setJarUploadError] = useState<string | null>(null);
   const [jarUploadSuccess, setJarUploadSuccess] = useState<string | null>(null);
+  const [jarUploadProgress, setJarUploadProgress] = useState<number | null>(null);
 
   // Fetch servers list
   const fetchServers = async () => {
@@ -180,22 +219,19 @@ export default function DashboardClient({ user }: { user: User }) {
     setZipUploadLoading(true);
     setZipUploadError(null);
     setZipUploadSuccess(null);
-    const formData = new FormData();
-    formData.append('file', zipUploadFile);
+    setZipUploadProgress(0);
     try {
-      const res = await fetch('/api/uploads', { method: 'POST', body: formData });
-      const data = await res.json();
-      if (res.ok && data.success) {
-        setZipUploadSuccess(data.message);
-        setZipUploadFile(null);
-        fetchUploads();
-      } else {
-        setZipUploadError(data.error || 'Upload failed.');
-      }
-    } catch {
-      setZipUploadError('Network error uploading file.');
+      await uploadInChunks(zipUploadFile, '/api/uploads', setZipUploadProgress);
+      setZipUploadSuccess(`Datei "${zipUploadFile.name}" erfolgreich hochgeladen.`);
+      setZipUploadFile(null);
+      fetchUploads();
+    } catch (err) {
+      console.error(err);
+      const message = err instanceof Error ? err.message : 'Netzwerkfehler beim Hochladen.';
+      setZipUploadError(message);
     } finally {
       setZipUploadLoading(false);
+      setZipUploadProgress(null);
     }
   };
 
@@ -205,22 +241,19 @@ export default function DashboardClient({ user }: { user: User }) {
     setJarUploadLoading(true);
     setJarUploadError(null);
     setJarUploadSuccess(null);
-    const formData = new FormData();
-    formData.append('file', jarUploadFile);
+    setJarUploadProgress(0);
     try {
-      const res = await fetch('/api/uploads', { method: 'POST', body: formData });
-      const data = await res.json();
-      if (res.ok && data.success) {
-        setJarUploadSuccess(data.message);
-        setJarUploadFile(null);
-        fetchUploads();
-      } else {
-        setJarUploadError(data.error || 'Upload failed.');
-      }
-    } catch {
-      setJarUploadError('Network error uploading file.');
+      await uploadInChunks(jarUploadFile, '/api/uploads', setJarUploadProgress);
+      setJarUploadSuccess(`Datei "${jarUploadFile.name}" erfolgreich hochgeladen.`);
+      setJarUploadFile(null);
+      fetchUploads();
+    } catch (err) {
+      console.error(err);
+      const message = err instanceof Error ? err.message : 'Netzwerkfehler beim Hochladen.';
+      setJarUploadError(message);
     } finally {
       setJarUploadLoading(false);
+      setJarUploadProgress(null);
     }
   };
 
@@ -424,8 +457,20 @@ export default function DashboardClient({ user }: { user: User }) {
                     accept=".zip"
                   />
 
+                  {zipUploadProgress !== null && (
+                    <div style={{ width: '100%', display: 'flex', flexDirection: 'column', gap: '4px' }}>
+                      <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: '0.8rem', color: 'var(--text-muted)' }}>
+                        <span>Lade hoch...</span>
+                        <span>{zipUploadProgress}%</span>
+                      </div>
+                      <div style={{ width: '100%', backgroundColor: 'rgba(255, 255, 255, 0.1)', borderRadius: '4px', height: '8px', overflow: 'hidden' }}>
+                        <div style={{ width: `${zipUploadProgress}%`, height: '100%', backgroundColor: 'var(--primary)', transition: 'width 0.1s ease-in-out' }} />
+                      </div>
+                    </div>
+                  )}
+
                   <button type="submit" className="btn btn-primary" disabled={!zipUploadFile || zipUploadLoading}>
-                    {zipUploadLoading ? 'Lade ZIP hoch...' : 'ZIP hochladen'}
+                    {zipUploadLoading ? `Lade ZIP hoch... ${zipUploadProgress !== null ? `${zipUploadProgress}%` : ''}` : 'ZIP hochladen'}
                   </button>
                 </form>
 
@@ -490,8 +535,20 @@ export default function DashboardClient({ user }: { user: User }) {
                     accept=".jar"
                   />
 
+                  {jarUploadProgress !== null && (
+                    <div style={{ width: '100%', display: 'flex', flexDirection: 'column', gap: '4px' }}>
+                      <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: '0.8rem', color: 'var(--text-muted)' }}>
+                        <span>Lade hoch...</span>
+                        <span>{jarUploadProgress}%</span>
+                      </div>
+                      <div style={{ width: '100%', backgroundColor: 'rgba(255, 255, 255, 0.1)', borderRadius: '4px', height: '8px', overflow: 'hidden' }}>
+                        <div style={{ width: `${jarUploadProgress}%`, height: '100%', backgroundColor: 'var(--primary)', transition: 'width 0.1s ease-in-out' }} />
+                      </div>
+                    </div>
+                  )}
+
                   <button type="submit" className="btn btn-primary" disabled={!jarUploadFile || jarUploadLoading}>
-                    {jarUploadLoading ? 'Lade JAR hoch...' : 'JAR hochladen'}
+                    {jarUploadLoading ? `Lade JAR hoch... ${jarUploadProgress !== null ? `${jarUploadProgress}%` : ''}` : 'JAR hochladen'}
                   </button>
                 </form>
 
