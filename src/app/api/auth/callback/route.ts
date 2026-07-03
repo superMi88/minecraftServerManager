@@ -110,11 +110,11 @@ export async function GET(request: NextRequest) {
 
     const jwtToken = await signToken(tokenPayload);
 
-    // 5. Set cookie and return success
+    const isHttps = request.nextUrl.protocol === 'https:' || request.headers.get('x-forwarded-proto') === 'https';
     const response = NextResponse.json({ success: true });
     response.cookies.set('jwt', jwtToken, {
       httpOnly: true,
-      secure: process.env.NODE_ENV === 'production',
+      secure: process.env.NODE_ENV === 'production' && isHttps,
       sameSite: 'lax',
       maxAge: 60 * 60 * 24, // 24 hours
       path: '/',
