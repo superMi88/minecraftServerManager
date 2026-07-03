@@ -124,67 +124,78 @@ export async function POST(request: NextRequest, { params }: { params: Params })
             return NextResponse.json({ success: true, message: `Plugin "${filename}" uploaded successfully.` });
           }
         } else if (server.type === 'CURSEFORGE') {
-          // Extract zip logic (reused)
-          console.log(`Extracting CurseForge zip file to ${serverFolder}...`);
-          try {
-            const directory = await unzipper.Open.file(finalPath);
-            const entries = directory.files;
+          // Extract zip logic in background to prevent HTTP timeouts
+          Promise.resolve().then(async () => {
+            const logFile = path.join(serverFolder, 'console.txt');
+            const appendLog = (msg: string) => {
+              try { fs.appendFileSync(logFile, `[System] ${msg}\n`); } catch {}
+            };
 
-            if (entries.length === 0) {
-              throw new Error('ZIP file is empty.');
-            }
+            appendLog(`Starte Entpacken von Modpack ZIP-Datei: ${filename}...`);
+            console.log(`Extracting CurseForge zip file to ${serverFolder} in background...`);
+            try {
+              const directory = await unzipper.Open.file(finalPath);
+              const entries = directory.files;
 
-            const firstEntryPath = entries[0].path;
-            const rootFolder = firstEntryPath.split('/')[0];
-            
-            let allHaveCommonRoot = true;
-            for (const entry of entries) {
-              if (!entry.path.startsWith(rootFolder + '/') && entry.path !== rootFolder) {
-                allHaveCommonRoot = false;
-                break;
+              if (entries.length === 0) {
+                throw new Error('ZIP file is empty.');
               }
-            }
 
-            for (const entry of entries) {
-              let relativePath = entry.path;
-              if (allHaveCommonRoot && relativePath.startsWith(rootFolder + '/')) {
-                relativePath = relativePath.slice(rootFolder.length + 1);
-              }
+              const firstEntryPath = entries[0].path;
+              const rootFolder = firstEntryPath.split('/')[0];
               
-              if (!relativePath) continue;
-
-              const fullPath = path.join(serverFolder, relativePath);
-
-              if (entry.type === 'Directory') {
-                fs.mkdirSync(fullPath, { recursive: true });
-              } else {
-                fs.mkdirSync(path.dirname(fullPath), { recursive: true });
-                
-                await new Promise<void>((resolve, reject) => {
-                  entry.stream()
-                    .pipe(fs.createWriteStream(fullPath))
-                    .on('finish', resolve)
-                    .on('error', reject);
-                });
+              let allHaveCommonRoot = true;
+              for (const entry of entries) {
+                if (!entry.path.startsWith(rootFolder + '/') && entry.path !== rootFolder) {
+                  allHaveCommonRoot = false;
+                  break;
+                }
               }
-            }
 
-            fs.unlinkSync(finalPath);
+              for (const entry of entries) {
+                let relativePath = entry.path;
+                if (allHaveCommonRoot && relativePath.startsWith(rootFolder + '/')) {
+                  relativePath = relativePath.slice(rootFolder.length + 1);
+                }
+                
+                if (!relativePath) continue;
 
-            await prisma.curseForgeServer.update({
-              where: { id },
-              data: { curseForgeZip: filename },
-            });
+                const fullPath = path.join(serverFolder, relativePath);
 
-            return NextResponse.json({ success: true, message: 'CurseForge zip file successfully extracted.' });
-          } catch (err) {
-            console.error('Error during zip extraction:', err);
-            if (fs.existsSync(finalPath)) {
+                if (entry.type === 'Directory') {
+                  fs.mkdirSync(fullPath, { recursive: true });
+                } else {
+                  fs.mkdirSync(path.dirname(fullPath), { recursive: true });
+                  
+                  await new Promise<void>((resolve, reject) => {
+                    entry.stream()
+                      .pipe(fs.createWriteStream(fullPath))
+                      .on('finish', resolve)
+                      .on('error', reject);
+                  });
+                }
+              }
+
               fs.unlinkSync(finalPath);
+
+              await prisma.curseForgeServer.update({
+                where: { id },
+                data: { curseForgeZip: filename },
+              });
+
+              appendLog(`Modpack ZIP-Datei erfolgreich entpackt! Server ist jetzt bereit.`);
+              console.log("Unzipping complete!");
+            } catch (err) {
+              console.error('Error during background zip extraction:', err);
+              if (fs.existsSync(finalPath)) {
+                try { fs.unlinkSync(finalPath); } catch {}
+              }
+              const message = err instanceof Error ? err.message : String(err);
+              appendLog(`FEHLER beim Entpacken der Modpack ZIP-Datei: ${message}`);
             }
-            const message = err instanceof Error ? err.message : String(err);
-            return NextResponse.json({ success: false, error: `Unzipping failed: ${message}` }, { status: 500 });
-          }
+          });
+
+          return NextResponse.json({ success: true, message: 'CurseForge zip file uploaded successfully. Extracting in background...' });
         }
       }
 
@@ -226,55 +237,68 @@ export async function POST(request: NextRequest, { params }: { params: Params })
         }
         const zipPath = path.join(serverFolder, filename);
         fs.writeFileSync(zipPath, buffer);
-        console.log(`Extracting CurseForge zip file to ${serverFolder}...`);
-        try {
-          const directory = await unzipper.Open.file(zipPath);
-          const entries = directory.files;
-          if (entries.length === 0) {
-            throw new Error('ZIP file is empty.');
-          }
-          const firstEntryPath = entries[0].path;
-          const rootFolder = firstEntryPath.split('/')[0];
-          let allHaveCommonRoot = true;
-          for (const entry of entries) {
-            if (!entry.path.startsWith(rootFolder + '/') && entry.path !== rootFolder) {
-              allHaveCommonRoot = false;
-              break;
+        
+        // Run extraction in background to prevent HTTP timeouts
+        Promise.resolve().then(async () => {
+          const logFile = path.join(serverFolder, 'console.txt');
+          const appendLog = (msg: string) => {
+            try { fs.appendFileSync(logFile, `[System] ${msg}\n`); } catch {}
+          };
+
+          appendLog(`Starte Entpacken von Modpack ZIP-Datei: ${filename}...`);
+          console.log(`Extracting CurseForge zip file to ${serverFolder} in background...`);
+          try {
+            const directory = await unzipper.Open.file(zipPath);
+            const entries = directory.files;
+            if (entries.length === 0) {
+              throw new Error('ZIP file is empty.');
             }
-          }
-          for (const entry of entries) {
-            let relativePath = entry.path;
-            if (allHaveCommonRoot && relativePath.startsWith(rootFolder + '/')) {
-              relativePath = relativePath.slice(rootFolder.length + 1);
+            const firstEntryPath = entries[0].path;
+            const rootFolder = firstEntryPath.split('/')[0];
+            let allHaveCommonRoot = true;
+            for (const entry of entries) {
+              if (!entry.path.startsWith(rootFolder + '/') && entry.path !== rootFolder) {
+                allHaveCommonRoot = false;
+                break;
+              }
             }
-            if (!relativePath) continue;
-            const fullPath = path.join(serverFolder, relativePath);
-            if (entry.type === 'Directory') {
-              fs.mkdirSync(fullPath, { recursive: true });
-            } else {
-              fs.mkdirSync(path.dirname(fullPath), { recursive: true });
-              await new Promise<void>((resolve, reject) => {
-                entry.stream()
-                  .pipe(fs.createWriteStream(fullPath))
-                  .on('finish', resolve)
-                  .on('error', reject);
-              });
+            for (const entry of entries) {
+              let relativePath = entry.path;
+              if (allHaveCommonRoot && relativePath.startsWith(rootFolder + '/')) {
+                relativePath = relativePath.slice(rootFolder.length + 1);
+              }
+              if (!relativePath) continue;
+              const fullPath = path.join(serverFolder, relativePath);
+              if (entry.type === 'Directory') {
+                fs.mkdirSync(fullPath, { recursive: true });
+              } else {
+                fs.mkdirSync(path.dirname(fullPath), { recursive: true });
+                await new Promise<void>((resolve, reject) => {
+                  entry.stream()
+                    .pipe(fs.createWriteStream(fullPath))
+                    .on('finish', resolve)
+                    .on('error', reject);
+                });
+              }
             }
-          }
-          fs.unlinkSync(zipPath);
-          await prisma.curseForgeServer.update({
-            where: { id },
-            data: { curseForgeZip: filename },
-          });
-          return NextResponse.json({ success: true, message: 'CurseForge zip file successfully extracted.' });
-        } catch (err) {
-          console.error('Error during zip extraction:', err);
-          if (fs.existsSync(zipPath)) {
             fs.unlinkSync(zipPath);
+            await prisma.curseForgeServer.update({
+              where: { id },
+              data: { curseForgeZip: filename },
+            });
+            appendLog(`Modpack ZIP-Datei erfolgreich entpackt! Server ist jetzt bereit.`);
+            console.log("Unzipping complete!");
+          } catch (err) {
+            console.error('Error during background zip extraction:', err);
+            if (fs.existsSync(zipPath)) {
+              try { fs.unlinkSync(zipPath); } catch {}
+            }
+            const message = err instanceof Error ? err.message : String(err);
+            appendLog(`FEHLER beim Entpacken der Modpack ZIP-Datei: ${message}`);
           }
-          const message = err instanceof Error ? err.message : String(err);
-          return NextResponse.json({ success: false, error: `Unzipping failed: ${message}` }, { status: 500 });
-        }
+        });
+
+        return NextResponse.json({ success: true, message: 'CurseForge zip file uploaded successfully. Extracting in background...' });
       } else {
         return NextResponse.json({ success: false, error: 'Unknown server type.' }, { status: 400 });
       }

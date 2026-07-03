@@ -31,7 +31,7 @@ const uploadInChunks = async (
     const chunk = file.slice(start, end);
     
     const formData = new FormData();
-    formData.append('file', chunk);
+    formData.append('file', chunk, file.name);
     formData.append('chunkIndex', index.toString());
     formData.append('totalChunks', totalChunks.toString());
     formData.append('originalName', file.name);
