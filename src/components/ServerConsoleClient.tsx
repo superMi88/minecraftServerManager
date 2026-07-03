@@ -169,8 +169,9 @@ export default function ServerConsoleClient({
   useEffect(() => {
     Promise.resolve().then(() => {
       fetchMetadata();
+      fetchUploads();
     });
-  }, [fetchMetadata]);
+  }, [fetchMetadata, fetchUploads]);
 
   const fetchBackups = useCallback(async () => {
     setBackupsLoading(true);
@@ -681,7 +682,13 @@ export default function ServerConsoleClient({
           <div className={`tab ${activeTab === 'backups' ? 'active' : ''}`} onClick={() => setActiveTab('backups')}>
             Backups
           </div>
-          <div className={`tab ${activeTab === 'settings' ? 'active' : ''}`} onClick={() => setActiveTab('settings')}>
+          <div
+            className={`tab ${activeTab === 'settings' ? 'active' : ''}`}
+            onClick={() => {
+              setActiveTab('settings');
+              fetchUploads();
+            }}
+          >
             Einstellungen
           </div>
         </div>
