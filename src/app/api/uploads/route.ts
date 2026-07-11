@@ -5,12 +5,14 @@ import path from 'path';
 const UPLOADS_DIR = path.join(process.cwd(), 'uploads');
 const ZIPS_DIR = path.join(UPLOADS_DIR, 'zips');
 const JARS_DIR = path.join(UPLOADS_DIR, 'jars');
+const PLUGINS_DIR = path.join(UPLOADS_DIR, 'plugins');
 
 // Helper to ensure upload directories exist
 function ensureDirs() {
   if (!fs.existsSync(UPLOADS_DIR)) fs.mkdirSync(UPLOADS_DIR, { recursive: true });
   if (!fs.existsSync(ZIPS_DIR)) fs.mkdirSync(ZIPS_DIR, { recursive: true });
   if (!fs.existsSync(JARS_DIR)) fs.mkdirSync(JARS_DIR, { recursive: true });
+  if (!fs.existsSync(PLUGINS_DIR)) fs.mkdirSync(PLUGINS_DIR, { recursive: true });
 }
 
 // GET all uploaded files
@@ -40,8 +42,9 @@ export async function GET() {
 
     const zips = readFilesFromDir(ZIPS_DIR, '.zip');
     const jars = readFilesFromDir(JARS_DIR, '.jar');
+    const plugins = readFilesFromDir(PLUGINS_DIR, '.jar');
 
-    return NextResponse.json({ success: true, zips, jars });
+    return NextResponse.json({ success: true, zips, jars, plugins });
   } catch (error) {
     console.error('Error fetching uploads:', error);
     const message = error instanceof Error ? error.message : String(error);
@@ -49,7 +52,7 @@ export async function GET() {
   }
 }
 
-// POST upload new ZIP or JAR
+// POST upload new ZIP, JAR, or Plugin
 export async function POST(request: NextRequest) {
   try {
     ensureDirs();
@@ -64,6 +67,7 @@ export async function POST(request: NextRequest) {
     const chunkIndexStr = formData.get('chunkIndex') as string | null;
     const totalChunksStr = formData.get('totalChunks') as string | null;
     const originalName = formData.get('originalName') as string | null;
+    const uploadType = formData.get('uploadType') as string | null; // 'zip' | 'jar' | 'plugin'
 
     const isChunked = chunkIndexStr !== null && totalChunksStr !== null && originalName !== null;
 
@@ -78,7 +82,13 @@ export async function POST(request: NextRequest) {
         return NextResponse.json({ success: false, error: 'Only .zip and .jar files are allowed.' }, { status: 400 });
       }
 
-      const targetDir = ext === '.zip' ? ZIPS_DIR : JARS_DIR;
+      let targetDir = JARS_DIR;
+      if (uploadType === 'zip' || (!uploadType && ext === '.zip')) {
+        targetDir = ZIPS_DIR;
+      } else if (uploadType === 'plugin') {
+        targetDir = PLUGINS_DIR;
+      }
+
       const tmpDirName = `tmp_upload_${sanitizedFilename}`;
       const tmpDirPath = path.join(targetDir, tmpDirName);
 
@@ -119,7 +129,7 @@ export async function POST(request: NextRequest) {
           success: true,
           message: `File "${sanitizedFilename}" uploaded successfully.`,
           filename: sanitizedFilename,
-          type: ext === '.zip' ? 'ZIP' : 'JAR',
+          type: ext === '.zip' ? 'ZIP' : (uploadType === 'plugin' ? 'PLUGIN' : 'JAR'),
         });
       }
 
@@ -142,16 +152,21 @@ export async function POST(request: NextRequest) {
       const bytes = await file.arrayBuffer();
       const buffer = Buffer.from(bytes);
 
-      const targetDir = ext === '.zip' ? ZIPS_DIR : JARS_DIR;
+      let targetDir = JARS_DIR;
+      if (uploadType === 'zip' || (!uploadType && ext === '.zip')) {
+        targetDir = ZIPS_DIR;
+      } else if (uploadType === 'plugin') {
+        targetDir = PLUGINS_DIR;
+      }
+      
       const targetPath = path.join(targetDir, sanitizedFilename);
-
       fs.writeFileSync(targetPath, buffer);
 
       return NextResponse.json({
         success: true,
         message: `File "${sanitizedFilename}" uploaded successfully.`,
         filename: sanitizedFilename,
-        type: ext === '.zip' ? 'ZIP' : 'JAR',
+        type: ext === '.zip' ? 'ZIP' : (uploadType === 'plugin' ? 'PLUGIN' : 'JAR'),
       });
     }
   } catch (error) {
@@ -168,7 +183,7 @@ export async function DELETE(request: NextRequest) {
 
     const { searchParams } = new URL(request.url);
     const name = searchParams.get('name');
-    const type = searchParams.get('type'); // 'zip' or 'jar'
+    const type = searchParams.get('type'); // 'zip' | 'jar' | 'plugin'
 
     if (!name || !type) {
       return NextResponse.json({ success: false, error: 'Parameters name and type are required.' }, { status: 400 });
@@ -177,19 +192,25 @@ export async function DELETE(request: NextRequest) {
     const filename = path.basename(name);
     const ext = path.extname(filename).toLowerCase();
 
-    if (type !== 'zip' && type !== 'jar') {
-      return NextResponse.json({ success: false, error: 'Invalid type parameter. Must be "zip" or "jar".' }, { status: 400 });
+    if (type !== 'zip' && type !== 'jar' && type !== 'plugin') {
+      return NextResponse.json({ success: false, error: 'Invalid type parameter. Must be "zip", "jar" or "plugin".' }, { status: 400 });
     }
 
     if (type === 'zip' && ext !== '.zip') {
       return NextResponse.json({ success: false, error: 'Filename does not match zip extension.' }, { status: 400 });
     }
 
-    if (type === 'jar' && ext !== '.jar') {
+    if ((type === 'jar' || type === 'plugin') && ext !== '.jar') {
       return NextResponse.json({ success: false, error: 'Filename does not match jar extension.' }, { status: 400 });
     }
 
-    const targetDir = type === 'zip' ? ZIPS_DIR : JARS_DIR;
+    let targetDir = JARS_DIR;
+    if (type === 'zip') {
+      targetDir = ZIPS_DIR;
+    } else if (type === 'plugin') {
+      targetDir = PLUGINS_DIR;
+    }
+    
     const filePath = path.join(targetDir, filename);
 
     if (!fs.existsSync(filePath)) {

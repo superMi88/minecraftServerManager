@@ -49,6 +49,8 @@ export async function GET(request: NextRequest, { params }: { params: Params }) 
         }
       }
     }
+    const folderPath = getServerFolderPath(id);
+    const oldFolderExists = fs.existsSync(folderPath + '_old');
 
     return NextResponse.json({
       success: true,
@@ -57,6 +59,7 @@ export async function GET(request: NextRequest, { params }: { params: Params }) 
         type: serverType,
         isRunning: isServerRunning(id),
         availableShFiles,
+        rollbackAvailable: oldFolderExists,
       },
     });
   } catch (error) {

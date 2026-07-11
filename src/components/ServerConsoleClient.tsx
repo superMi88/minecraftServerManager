@@ -64,7 +64,7 @@ export default function ServerConsoleClient({
   const router = useRouter();
   
   // Tab control
-  const [activeTab, setActiveTab] = useState<'console' | 'properties' | 'files' | 'backups' | 'settings'>('console');
+  const [activeTab, setActiveTab] = useState<'console' | 'properties' | 'plugins' | 'files' | 'backups' | 'settings' | 'update'>('console');
   
   // Console tab states
   const [logs, setLogs] = useState('Lade Logs...');
@@ -86,6 +86,7 @@ export default function ServerConsoleClient({
   const [uploadError, setUploadError] = useState<string | null>(null);
   const [uploadSuccess, setUploadSuccess] = useState<string | null>(null);
   const [uploadProgress, setUploadProgress] = useState<number | null>(null);
+  const [isFileDragging, setIsFileDragging] = useState(false);
   
   // Settings tab states
   const [name, setName] = useState(initialServerName);
@@ -109,6 +110,20 @@ export default function ServerConsoleClient({
   
   const [zips, setZips] = useState<{ name: string; size: number; createdAt: string }[]>([]);
   const [jars, setJars] = useState<{ name: string; size: number; createdAt: string }[]>([]);
+  const [globalPlugins, setGlobalPlugins] = useState<{ name: string; size: number; createdAt: string }[]>([]);
+  const [togglingPluginName, setTogglingPluginName] = useState<string | null>(null);
+
+  // Update/Rollback states
+  const [targetJar, setTargetJar] = useState('');
+  const [targetZip, setTargetZip] = useState('');
+  const [updateLoading, setUpdateLoading] = useState(false);
+  const [updateError, setUpdateError] = useState<string | null>(null);
+  const [updateSuccess, setUpdateSuccess] = useState<string | null>(null);
+  
+  const [rollbackLoading, setRollbackLoading] = useState(false);
+  const [rollbackError, setRollbackError] = useState<string | null>(null);
+  const [rollbackSuccess, setRollbackSuccess] = useState<string | null>(null);
+  const [rollbackAvailable, setRollbackAvailable] = useState(false);
 
   // Backup states
   const [backups, setBackups] = useState<{ name: string; size: number; createdAt: string }[]>([]);
@@ -147,6 +162,7 @@ export default function ServerConsoleClient({
         }
         setOpPlayer(data.server.opPlayer || '');
         setIsRunning(data.server.isRunning);
+        setRollbackAvailable(data.server.rollbackAvailable || false);
       }
     } catch (err) {
       console.error('Failed to load server metadata', err);
@@ -160,6 +176,7 @@ export default function ServerConsoleClient({
       if (res.ok && data.success) {
         setZips(data.zips);
         setJars(data.jars);
+        setGlobalPlugins(data.plugins || []);
       }
     } catch (err) {
       console.error('Failed to fetch uploads:', err);
@@ -240,7 +257,7 @@ export default function ServerConsoleClient({
 
   useEffect(() => {
     Promise.resolve().then(() => {
-      if (activeTab === 'settings') {
+      if (activeTab === 'settings' || activeTab === 'update' || activeTab === 'plugins') {
         fetchUploads();
       } else if (activeTab === 'backups') {
         fetchBackups();
@@ -301,9 +318,8 @@ export default function ServerConsoleClient({
     }
   }, [serverId, activeTab]);
 
-  // Fetch Plugins when switching to Files tab (Paper only)
+  // Fetch Plugins when switching to Files/Plugins tab
   const fetchPlugins = useCallback(async () => {
-    if (serverType !== 'PAPER') return;
     setPluginsLoading(true);
     try {
       const res = await fetch(`/api/servers/${serverId}/plugins`);
@@ -316,10 +332,10 @@ export default function ServerConsoleClient({
     } finally {
       setPluginsLoading(false);
     }
-  }, [serverId, serverType]);
+  }, [serverId]);
 
   useEffect(() => {
-    if (activeTab === 'files') {
+    if (activeTab === 'files' || activeTab === 'plugins') {
       Promise.resolve().then(() => {
         fetchPlugins();
       });
@@ -446,6 +462,92 @@ export default function ServerConsoleClient({
       }
     } catch (err) {
       console.error(err);
+    }
+  };
+
+  const handleTogglePlugin = async (pluginName: string, currentlyInstalled: boolean) => {
+    setTogglingPluginName(pluginName);
+    try {
+      const res = await fetch(`/api/servers/${serverId}/plugins`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          pluginName,
+          selected: !currentlyInstalled,
+        }),
+      });
+      const data = await res.json();
+      if (res.ok && data.success) {
+        fetchPlugins();
+      } else {
+        alert(data.error || 'Fehler beim Ändern des Plugin-Zustands.');
+      }
+    } catch (err) {
+      console.error(err);
+      alert('Netzwerkfehler beim Ändern des Plugins.');
+    } finally {
+      setTogglingPluginName(null);
+    }
+  };
+
+  const handleServerUpdate = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (isRunning) {
+      alert('Der Server muss ausgeschaltet sein, um ein Update durchzuführen.');
+      return;
+    }
+    setUpdateLoading(true);
+    setUpdateError(null);
+    setUpdateSuccess(null);
+    try {
+      const res = await fetch(`/api/servers/${serverId}/update`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          targetJar: serverType === 'PAPER' ? targetJar : undefined,
+          targetZip: serverType === 'CURSEFORGE' ? targetZip : undefined,
+        }),
+      });
+      const data = await res.json();
+      if (res.ok && data.success) {
+        setUpdateSuccess(data.message || 'Update erfolgreich durchgeführt.');
+        fetchMetadata();
+      } else {
+        setUpdateError(data.error || 'Fehler beim Durchführen des Updates.');
+      }
+    } catch {
+      setUpdateError('Netzwerkfehler beim Ausführen des Updates.');
+    } finally {
+      setUpdateLoading(false);
+    }
+  };
+
+  const handleServerRollback = async () => {
+    if (isRunning) {
+      alert('Der Server muss ausgeschaltet sein, um ein Rollback durchzuführen.');
+      return;
+    }
+    if (!confirm('Möchtest du wirklich zum Zustand vor dem letzten Update zurückkehren? Der aktuelle Zustand wird gelöscht.')) {
+      return;
+    }
+    setRollbackLoading(true);
+    setRollbackError(null);
+    setRollbackSuccess(null);
+    try {
+      const res = await fetch(`/api/servers/${serverId}/rollback`, {
+        method: 'POST',
+      });
+      const data = await res.json();
+      if (res.ok && data.success) {
+        setRollbackSuccess(data.message || 'Rollback erfolgreich durchgeführt.');
+        fetchMetadata();
+      } else {
+        setRollbackError(data.error || 'Fehler beim Rollback.');
+      }
+    } catch {
+      setRollbackError('Netzwerkfehler beim Ausführen des Rollbacks.');
+    } finally {
+      setRollbackLoading(false);
     }
   };
 
@@ -676,6 +778,9 @@ export default function ServerConsoleClient({
           <div className={`tab ${activeTab === 'properties' ? 'active' : ''}`} onClick={() => setActiveTab('properties')}>
             server.properties
           </div>
+          <div className={`tab ${activeTab === 'plugins' ? 'active' : ''}`} onClick={() => { setActiveTab('plugins'); fetchUploads(); }}>
+            Plugins
+          </div>
           <div className={`tab ${activeTab === 'files' ? 'active' : ''}`} onClick={() => setActiveTab('files')}>
             Dateien / Uploads
           </div>
@@ -690,6 +795,15 @@ export default function ServerConsoleClient({
             }}
           >
             Einstellungen
+          </div>
+          <div
+            className={`tab ${activeTab === 'update' ? 'active' : ''}`}
+            onClick={() => {
+              setActiveTab('update');
+              fetchUploads();
+            }}
+          >
+            Server updaten
           </div>
         </div>
 
@@ -769,12 +883,24 @@ export default function ServerConsoleClient({
                 )}
 
                 <form onSubmit={handleFileUpload} className="card" style={{ display: 'flex', flexDirection: 'column', gap: '16px' }}>
-                  <div className="dropzone" onClick={() => document.getElementById('file-upload-input')?.click()}>
+                  <div 
+                    className={`dropzone ${isFileDragging ? 'dragging' : ''}`}
+                    onClick={() => document.getElementById('file-upload-input')?.click()}
+                    onDragOver={(e) => { e.preventDefault(); setIsFileDragging(true); }}
+                    onDragLeave={() => setIsFileDragging(false)}
+                    onDrop={(e) => {
+                      e.preventDefault();
+                      setIsFileDragging(false);
+                      if (e.dataTransfer.files && e.dataTransfer.files.length > 0) {
+                        setUploadFile(e.dataTransfer.files[0]);
+                      }
+                    }}
+                  >
                     <svg style={{ width: '40px', height: '40px', margin: '0 auto', opacity: 0.5 }} fill="none" stroke="currentColor" viewBox="0 0 24 24">
                       <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="1.5" d="M7 16a4 4 0 01-.88-7.903A5 5 0 1115.9 6L16 6a5 5 0 011 9.9M15 13l-3-3m0 0l-3 3m3-3v12" />
                     </svg>
                     <div className="dropzone-text">
-                      {uploadFile ? uploadFile.name : 'Klicke hier, um eine Datei auszuwählen'}
+                      {uploadFile ? uploadFile.name : 'Klicke hier oder ziehe eine Datei hierher'}
                     </div>
                   </div>
                   
@@ -851,6 +977,69 @@ export default function ServerConsoleClient({
                   </div>
                 )}
               </div>
+            </div>
+          </div>
+        )}
+
+        {/* Tab Content: Plugins */}
+        {activeTab === 'plugins' && (
+          <div>
+            <div className="card">
+              <h3 style={{ color: '#fff', marginBottom: '8px' }}>Global hochgeladene Plugins / Mods</h3>
+              <p style={{ color: 'var(--text-muted)', fontSize: '0.9rem', marginBottom: '24px' }}>
+                Wähle aus den in der globalen Dateiverwaltung hochgeladenen Plugins aus. Sie werden automatisch in den {serverType === 'PAPER' ? 'plugins' : 'mods'}-Ordner dieses Servers kopiert.
+              </p>
+
+              {pluginsLoading ? (
+                <div style={{ color: 'var(--text-muted)' }}>Lade installierte Plugins...</div>
+              ) : globalPlugins.length === 0 ? (
+                <div style={{ color: 'var(--text-muted)', textAlign: 'center', padding: '32px', border: '1px dashed var(--border-color)', borderRadius: 'var(--border-radius)' }}>
+                  Keine globalen Plugins hochgeladen. Lade diese zuerst auf dem Dashboard unter &quot;Dateiverwaltung&quot; hoch.
+                </div>
+              ) : (
+                <div style={{ display: 'flex', flexDirection: 'column', gap: '10px' }}>
+                  {globalPlugins.map((plugin) => {
+                    const isInstalled = plugins.includes(plugin.name);
+                    const isToggling = togglingPluginName === plugin.name;
+
+                    return (
+                      <div
+                        key={plugin.name}
+                        className="card"
+                        style={{
+                          padding: '16px 20px',
+                          display: 'flex',
+                          justifyContent: 'space-between',
+                          alignItems: 'center',
+                          marginBottom: 0,
+                          backgroundColor: 'var(--input-bg)',
+                          borderLeft: isInstalled ? '4px solid var(--success)' : '1px solid var(--border-color)',
+                        }}
+                      >
+                        <div style={{ display: 'flex', flexDirection: 'column', gap: '4px' }}>
+                          <span style={{ fontWeight: 600, color: '#fff', fontSize: '0.95rem' }}>{plugin.name}</span>
+                          <span style={{ fontSize: '0.8rem', color: 'var(--text-muted)' }}>
+                            Größe: {(plugin.size / (1024 * 1024)).toFixed(2)} MB | Hochgeladen: {new Date(plugin.createdAt).toLocaleDateString()}
+                          </span>
+                        </div>
+
+                        <div>
+                          <label className="flex-gap" style={{ cursor: isToggling ? 'not-allowed' : 'pointer' }}>
+                            <input
+                              type="checkbox"
+                              checked={isInstalled}
+                              disabled={isToggling}
+                              onChange={() => handleTogglePlugin(plugin.name, isInstalled)}
+                              style={{ width: '18px', height: '18px', cursor: 'pointer' }}
+                            />
+                            <span>{isToggling ? 'Wird verarbeitet...' : (isInstalled ? 'Aktiviert' : 'Deaktiviert')}</span>
+                          </label>
+                        </div>
+                      </div>
+                    );
+                  })}
+                </div>
+              )}
             </div>
           </div>
         )}
@@ -1226,6 +1415,128 @@ export default function ServerConsoleClient({
                 >
                   {isRunning ? 'Stoppe den Server zum Löschen' : 'Server unwiderruflich löschen'}
                 </button>
+              </div>
+            </div>
+          </div>
+        )}
+
+        {/* Tab Content: Update Server */}
+        {activeTab === 'update' && (
+          <div>
+            <div className="grid-2">
+              {/* Left Column: Perform Update */}
+              <form onSubmit={handleServerUpdate} className="card">
+                <h3 style={{ color: '#fff', marginBottom: '16px' }}>Server updaten</h3>
+                <p style={{ color: 'var(--text-muted)', fontSize: '0.9rem', marginBottom: '24px' }}>
+                  Wechsle die Server-Version. Das System erstellt vollautomatisch ein Welt-Backup und verschiebt die aktuelle Version zur Sicherheit nach <code>_old</code>, bevor die neue Version installiert wird.
+                </p>
+
+                {isRunning && (
+                  <div style={{ color: 'var(--danger)', fontSize: '0.9rem', marginBottom: '20px', fontWeight: 600 }}>
+                    ⚠️ Stoppe den Server, um das Update durchzuführen.
+                  </div>
+                )}
+
+                {updateError && (
+                  <div className="card" style={{ borderLeft: '4px solid var(--danger)', color: 'var(--danger)', padding: '12px 16px', marginBottom: '16px' }}>
+                    {updateError}
+                  </div>
+                )}
+                {updateSuccess && (
+                  <div className="card" style={{ borderLeft: '4px solid var(--success)', color: 'var(--success)', padding: '12px 16px', marginBottom: '16px' }}>
+                    {updateSuccess}
+                  </div>
+                )}
+
+                <div className="form-group">
+                  <label className="form-label">Aktuelle Version</label>
+                  <div style={{ padding: '10px 14px', backgroundColor: 'rgba(255, 255, 255, 0.05)', borderRadius: 'var(--border-radius)', fontFamily: 'monospace' }}>
+                    {serverType === 'PAPER' ? (jarFile || 'server.jar') : (curseForgeZip || 'Kein ZIP geladen')}
+                  </div>
+                </div>
+
+                {serverType === 'PAPER' ? (
+                  <div className="form-group">
+                    <label className="form-label">Neue JAR-Datei auswählen</label>
+                    <select
+                      className="form-select"
+                      value={targetJar}
+                      onChange={(e) => setTargetJar(e.target.value)}
+                      disabled={isRunning || updateLoading}
+                      required
+                    >
+                      <option value="">-- Bitte JAR-Datei auswählen --</option>
+                      <option value="server.jar">server.jar (Standard)</option>
+                      {jars.map((jar) => (
+                        <option key={jar.name} value={jar.name}>
+                          {jar.name} ({(jar.size / (1024 * 1024)).toFixed(2)} MB)
+                        </option>
+                      ))}
+                    </select>
+                  </div>
+                ) : (
+                  <div className="form-group">
+                    <label className="form-label">Neues CurseForge Server Pack (.zip) auswählen</label>
+                    <select
+                      className="form-select"
+                      value={targetZip}
+                      onChange={(e) => setTargetZip(e.target.value)}
+                      disabled={isRunning || updateLoading}
+                      required
+                    >
+                      <option value="">-- Bitte ZIP-Datei auswählen --</option>
+                      {zips.map((zip) => (
+                        <option key={zip.name} value={zip.name}>
+                          {zip.name} ({(zip.size / (1024 * 1024)).toFixed(2)} MB)
+                        </option>
+                      ))}
+                    </select>
+                  </div>
+                )}
+
+                <button type="submit" className="btn btn-primary" style={{ width: '100%', marginTop: '16px' }} disabled={isRunning || updateLoading}>
+                  {updateLoading ? 'Update läuft (Backup & Kopieren)...' : 'Update starten'}
+                </button>
+              </form>
+
+              {/* Right Column: Rollback Option */}
+              <div className="card" style={{ display: 'flex', flexDirection: 'column', gap: '16px' }}>
+                <h3 style={{ color: '#fff' }}>Rollback (Zurückrollen)</h3>
+                <p style={{ color: 'var(--text-muted)', fontSize: '0.9rem' }}>
+                  Sollte es nach einem Update Probleme geben, kannst du hier die direkt davor gesicherte Version wiederherstellen. Dadurch wird der aktuelle neue Server gelöscht und der alte Stand exakt so wieder gestartet, wie er vor dem Update war.
+                </p>
+
+                {rollbackError && (
+                  <div className="card" style={{ borderLeft: '4px solid var(--danger)', color: 'var(--danger)', padding: '12px 16px', marginBottom: '16px' }}>
+                    {rollbackError}
+                  </div>
+                )}
+                {rollbackSuccess && (
+                  <div className="card" style={{ borderLeft: '4px solid var(--success)', color: 'var(--success)', padding: '12px 16px', marginBottom: '16px' }}>
+                    {rollbackSuccess}
+                  </div>
+                )}
+
+                {!rollbackAvailable ? (
+                  <div className="card" style={{ backgroundColor: 'rgba(255, 255, 255, 0.02)', textAlign: 'center', padding: '24px', color: 'var(--text-muted)' }}>
+                    Keine alte Server-Version für Rollback verfügbar.
+                  </div>
+                ) : (
+                  <div style={{ display: 'flex', flexDirection: 'column', gap: '16px' }}>
+                    <div style={{ color: 'var(--warning)', fontWeight: 600, fontSize: '0.9rem' }}>
+                      ⚠️ Eine gesicherte Version vor dem letzten Update wurde gefunden.
+                    </div>
+                    <button
+                      type="button"
+                      onClick={handleServerRollback}
+                      className="btn btn-warning"
+                      style={{ width: '100%' }}
+                      disabled={isRunning || rollbackLoading}
+                    >
+                      {rollbackLoading ? 'Führe Rollback aus...' : 'Rollback auf alte Version durchführen'}
+                    </button>
+                  </div>
+                )}
               </div>
             </div>
           </div>

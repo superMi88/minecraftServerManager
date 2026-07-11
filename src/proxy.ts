@@ -5,10 +5,9 @@ import { verifyToken } from './lib/auth';
 export async function proxy(request: NextRequest) {
   const { pathname } = request.nextUrl;
 
-  // Paths that are public
+  // Paths that are public (login page and auth API endpoints like login/logout)
   const isPublicPath =
     pathname === '/login' ||
-    pathname === '/callback' ||
     pathname.startsWith('/api/auth');
 
   const token = request.cookies.get('jwt')?.value;
@@ -32,7 +31,7 @@ export async function proxy(request: NextRequest) {
     return NextResponse.redirect(loginUrl);
   }
 
-  // If the user is logged in and tries to access login or callback, redirect to dashboard
+  // If the user is logged in and tries to access login page, redirect to dashboard
   if (isPublicPath && verifiedToken && pathname !== '/api/auth/logout') {
     const dashboardUrl = new URL('/', request.url);
     return NextResponse.redirect(dashboardUrl);

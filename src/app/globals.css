@@ -9,7 +9,7 @@
   --text-main: #f1f3f9;
   --text-muted: #8b949e;
   
-  --primary: #5865f2; /* Discord Blurple */
+  --primary: #5865f2; /* Panel Primary */
   --primary-hover: #4752c4;
   --success: #23a55a; /* Minecraft Green */
   --success-hover: #1b8245;
@@ -447,6 +447,12 @@ body {
 .dropzone:hover {
   border-color: var(--primary);
   background-color: rgba(88, 101, 242, 0.05);
+}
+
+.dropzone.dragging {
+  border-color: var(--primary);
+  background-color: rgba(88, 101, 242, 0.15);
+  box-shadow: 0 0 0 2px rgba(88, 101, 242, 0.2);
 }
 
 .dropzone-text {

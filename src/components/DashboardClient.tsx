@@ -27,6 +27,7 @@ const uploadInChunks = async (
   file: File,
   url: string,
   onProgress: (progress: number) => void,
+  uploadType?: string,
   chunkSize: number = 2 * 1024 * 1024 // 2MB chunks
 ) => {
   const totalChunks = Math.ceil(file.size / chunkSize);
@@ -40,6 +41,9 @@ const uploadInChunks = async (
     formData.append('chunkIndex', index.toString());
     formData.append('totalChunks', totalChunks.toString());
     formData.append('originalName', file.name);
+    if (uploadType) {
+      formData.append('uploadType', uploadType);
+    }
 
     const res = await fetch(url, {
       method: 'POST',
@@ -81,6 +85,7 @@ export default function DashboardClient({ user }: { user: User }) {
   // Uploads management state
   const [zips, setZips] = useState<{ name: string; size: number; createdAt: string }[]>([]);
   const [jars, setJars] = useState<{ name: string; size: number; createdAt: string }[]>([]);
+  const [plugins, setPlugins] = useState<{ name: string; size: number; createdAt: string }[]>([]);
   const [activeDashboardTab, setActiveDashboardTab] = useState<'servers' | 'uploads'>('servers');
 
   const [zipUploadFile, setZipUploadFile] = useState<File | null>(null);
@@ -88,12 +93,21 @@ export default function DashboardClient({ user }: { user: User }) {
   const [zipUploadError, setZipUploadError] = useState<string | null>(null);
   const [zipUploadSuccess, setZipUploadSuccess] = useState<string | null>(null);
   const [zipUploadProgress, setZipUploadProgress] = useState<number | null>(null);
+  const [isZipDragging, setIsZipDragging] = useState(false);
 
   const [jarUploadFile, setJarUploadFile] = useState<File | null>(null);
   const [jarUploadLoading, setJarUploadLoading] = useState(false);
   const [jarUploadError, setJarUploadError] = useState<string | null>(null);
   const [jarUploadSuccess, setJarUploadSuccess] = useState<string | null>(null);
   const [jarUploadProgress, setJarUploadProgress] = useState<number | null>(null);
+  const [isJarDragging, setIsJarDragging] = useState(false);
+
+  const [pluginUploadFile, setPluginUploadFile] = useState<File | null>(null);
+  const [pluginUploadLoading, setPluginUploadLoading] = useState(false);
+  const [pluginUploadError, setPluginUploadError] = useState<string | null>(null);
+  const [pluginUploadSuccess, setPluginUploadSuccess] = useState<string | null>(null);
+  const [pluginUploadProgress, setPluginUploadProgress] = useState<number | null>(null);
+  const [isPluginDragging, setIsPluginDragging] = useState(false);
 
   // Fetch servers list
   const fetchServers = async () => {
@@ -120,6 +134,7 @@ export default function DashboardClient({ user }: { user: User }) {
       if (res.ok && data.success) {
         setZips(data.zips);
         setJars(data.jars);
+        setPlugins(data.plugins || []);
       }
     } catch (err) {
       console.error('Failed to fetch uploads:', err);
@@ -221,7 +236,7 @@ export default function DashboardClient({ user }: { user: User }) {
     setZipUploadSuccess(null);
     setZipUploadProgress(0);
     try {
-      await uploadInChunks(zipUploadFile, '/api/uploads', setZipUploadProgress);
+      await uploadInChunks(zipUploadFile, '/api/uploads', setZipUploadProgress, 'zip');
       setZipUploadSuccess(`Datei "${zipUploadFile.name}" erfolgreich hochgeladen.`);
       setZipUploadFile(null);
       fetchUploads();
@@ -243,7 +258,7 @@ export default function DashboardClient({ user }: { user: User }) {
     setJarUploadSuccess(null);
     setJarUploadProgress(0);
     try {
-      await uploadInChunks(jarUploadFile, '/api/uploads', setJarUploadProgress);
+      await uploadInChunks(jarUploadFile, '/api/uploads', setJarUploadProgress, 'jar');
       setJarUploadSuccess(`Datei "${jarUploadFile.name}" erfolgreich hochgeladen.`);
       setJarUploadFile(null);
       fetchUploads();
@@ -257,7 +272,29 @@ export default function DashboardClient({ user }: { user: User }) {
     }
   };
 
-  const handleDeleteFile = async (name: string, type: 'zip' | 'jar') => {
+  const handlePluginUpload = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!pluginUploadFile) return;
+    setPluginUploadLoading(true);
+    setPluginUploadError(null);
+    setPluginUploadSuccess(null);
+    setPluginUploadProgress(0);
+    try {
+      await uploadInChunks(pluginUploadFile, '/api/uploads', setPluginUploadProgress, 'plugin');
+      setPluginUploadSuccess(`Plugin "${pluginUploadFile.name}" erfolgreich hochgeladen.`);
+      setPluginUploadFile(null);
+      fetchUploads();
+    } catch (err) {
+      console.error(err);
+      const message = err instanceof Error ? err.message : 'Netzwerkfehler beim Hochladen.';
+      setPluginUploadError(message);
+    } finally {
+      setPluginUploadLoading(false);
+      setPluginUploadProgress(null);
+    }
+  };
+
+  const handleDeleteFile = async (name: string, type: 'zip' | 'jar' | 'plugin') => {
     if (!confirm(`Möchtest du die Datei "${name}" wirklich löschen?`)) return;
     try {
       const res = await fetch(`/api/uploads?name=${encodeURIComponent(name)}&type=${type}`, {
@@ -284,19 +321,24 @@ export default function DashboardClient({ user }: { user: User }) {
           <span>Minecraft Server Manager</span>
         </Link>
         <div className="user-profile">
+          <div
+            style={{
+              background: 'var(--primary)',
+              color: 'white',
+              width: '32px',
+              height: '32px',
+              borderRadius: '50%',
+              display: 'flex',
+              alignItems: 'center',
+              justifyContent: 'center',
+              fontWeight: '700',
+              fontSize: '0.9rem',
+              boxShadow: 'var(--shadow-sm)',
+            }}
+          >
+            {user.username.charAt(0).toUpperCase()}
+          </div>
           <span style={{ fontWeight: 600 }}>{user.username}</span>
-          {user.userId && user.avatar && (
-            // eslint-disable-next-line @next/next/no-img-element
-            <img
-              src={`https://cdn.discordapp.com/avatars/${user.userId}/${user.avatar}.webp`}
-              className="avatar"
-              alt="Avatar"
-              onError={(e) => {
-                // Fail-safe if avatar URL construction is slightly off
-                (e.target as HTMLElement).style.display = 'none';
-              }}
-            />
-          )}
           <a href="/api/auth/logout" className="btn btn-secondary" style={{ padding: '6px 12px', fontSize: '0.85rem' }}>
             Logout
           </a>
@@ -423,7 +465,7 @@ export default function DashboardClient({ user }: { user: User }) {
 
         {activeDashboardTab === 'uploads' && (
           <div>
-            <div className="grid-2">
+            <div className="grid-3">
               {/* CurseForge ZIPs Panel */}
               <div className="card">
                 <h3 style={{ color: '#fff', marginBottom: '16px' }}>CurseForge Server Packs (.zip)</h3>
@@ -440,12 +482,24 @@ export default function DashboardClient({ user }: { user: User }) {
                 )}
 
                 <form onSubmit={handleZipUpload} style={{ display: 'flex', flexDirection: 'column', gap: '16px', marginBottom: '24px' }}>
-                  <div className="dropzone" onClick={() => document.getElementById('zip-upload-input')?.click()}>
+                  <div 
+                    className={`dropzone ${isZipDragging ? 'dragging' : ''}`}
+                    onClick={() => document.getElementById('zip-upload-input')?.click()}
+                    onDragOver={(e) => { e.preventDefault(); setIsZipDragging(true); }}
+                    onDragLeave={() => setIsZipDragging(false)}
+                    onDrop={(e) => {
+                      e.preventDefault();
+                      setIsZipDragging(false);
+                      if (e.dataTransfer.files && e.dataTransfer.files.length > 0) {
+                        setZipUploadFile(e.dataTransfer.files[0]);
+                      }
+                    }}
+                  >
                     <svg style={{ width: '40px', height: '40px', margin: '0 auto', opacity: 0.5 }} fill="none" stroke="currentColor" viewBox="0 0 24 24">
                       <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="1.5" d="M7 16a4 4 0 01-.88-7.903A5 5 0 1115.9 6L16 6a5 5 0 011 9.9M15 13l-3-3m0 0l-3 3m3-3v12" />
                     </svg>
                     <div className="dropzone-text">
-                      {zipUploadFile ? zipUploadFile.name : 'Klicke hier, um ein CurseForge ZIP auszuwählen'}
+                      {zipUploadFile ? zipUploadFile.name : 'Klicke hier oder ziehe ein ZIP hierher'}
                     </div>
                   </div>
                   
@@ -518,12 +572,24 @@ export default function DashboardClient({ user }: { user: User }) {
                 )}
 
                 <form onSubmit={handleJarUpload} style={{ display: 'flex', flexDirection: 'column', gap: '16px', marginBottom: '24px' }}>
-                  <div className="dropzone" onClick={() => document.getElementById('jar-upload-input')?.click()}>
+                  <div 
+                    className={`dropzone ${isJarDragging ? 'dragging' : ''}`}
+                    onClick={() => document.getElementById('jar-upload-input')?.click()}
+                    onDragOver={(e) => { e.preventDefault(); setIsJarDragging(true); }}
+                    onDragLeave={() => setIsJarDragging(false)}
+                    onDrop={(e) => {
+                      e.preventDefault();
+                      setIsJarDragging(false);
+                      if (e.dataTransfer.files && e.dataTransfer.files.length > 0) {
+                        setJarUploadFile(e.dataTransfer.files[0]);
+                      }
+                    }}
+                  >
                     <svg style={{ width: '40px', height: '40px', margin: '0 auto', opacity: 0.5 }} fill="none" stroke="currentColor" viewBox="0 0 24 24">
                       <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="1.5" d="M7 16a4 4 0 01-.88-7.903A5 5 0 1115.9 6L16 6a5 5 0 011 9.9M15 13l-3-3m0 0l-3 3m3-3v12" />
                     </svg>
                     <div className="dropzone-text">
-                      {jarUploadFile ? jarUploadFile.name : 'Klicke hier, um eine Server-JAR auszuwählen'}
+                      {jarUploadFile ? jarUploadFile.name : 'Klicke hier oder ziehe eine JAR hierher'}
                     </div>
                   </div>
                   
@@ -570,6 +636,96 @@ export default function DashboardClient({ user }: { user: User }) {
                         <button
                           className="btn btn-danger"
                           onClick={() => handleDeleteFile(jar.name, 'jar')}
+                          style={{ padding: '4px 8px', fontSize: '0.8rem', flexShrink: 0 }}
+                        >
+                          Löschen
+                        </button>
+                      </div>
+                    ))}
+                  </div>
+                )}
+              </div>
+
+              {/* Minecraft Plugins Panel */}
+              <div className="card">
+                <h3 style={{ color: '#fff', marginBottom: '16px' }}>Minecraft Plugins (.jar)</h3>
+                
+                {pluginUploadError && (
+                  <div className="card" style={{ borderLeft: '4px solid var(--danger)', color: 'var(--danger)', padding: '12px 16px', marginBottom: '16px' }}>
+                    {pluginUploadError}
+                  </div>
+                )}
+                {pluginUploadSuccess && (
+                  <div className="card" style={{ borderLeft: '4px solid var(--success)', color: 'var(--success)', padding: '12px 16px', marginBottom: '16px' }}>
+                    {pluginUploadSuccess}
+                  </div>
+                )}
+
+                <form onSubmit={handlePluginUpload} style={{ display: 'flex', flexDirection: 'column', gap: '16px', marginBottom: '24px' }}>
+                  <div 
+                    className={`dropzone ${isPluginDragging ? 'dragging' : ''}`}
+                    onClick={() => document.getElementById('plugin-upload-input')?.click()}
+                    onDragOver={(e) => { e.preventDefault(); setIsPluginDragging(true); }}
+                    onDragLeave={() => setIsPluginDragging(false)}
+                    onDrop={(e) => {
+                      e.preventDefault();
+                      setIsPluginDragging(false);
+                      if (e.dataTransfer.files && e.dataTransfer.files.length > 0) {
+                        setPluginUploadFile(e.dataTransfer.files[0]);
+                      }
+                    }}
+                  >
+                    <svg style={{ width: '40px', height: '40px', margin: '0 auto', opacity: 0.5 }} fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="1.5" d="M7 16a4 4 0 01-.88-7.903A5 5 0 1115.9 6L16 6a5 5 0 011 9.9M15 13l-3-3m0 0l-3 3m3-3v12" />
+                    </svg>
+                    <div className="dropzone-text">
+                      {pluginUploadFile ? pluginUploadFile.name : 'Klicke hier oder ziehe ein Plugin hierher'}
+                    </div>
+                  </div>
+                  
+                  <input
+                    type="file"
+                    id="plugin-upload-input"
+                    onChange={(e) => setPluginUploadFile(e.target.files?.[0] || null)}
+                    style={{ display: 'none' }}
+                    accept=".jar"
+                  />
+
+                  {pluginUploadProgress !== null && (
+                    <div style={{ width: '100%', display: 'flex', flexDirection: 'column', gap: '4px' }}>
+                      <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: '0.8rem', color: 'var(--text-muted)' }}>
+                        <span>Lade hoch...</span>
+                        <span>{pluginUploadProgress}%</span>
+                      </div>
+                      <div style={{ width: '100%', backgroundColor: 'rgba(255, 255, 255, 0.1)', borderRadius: '4px', height: '8px', overflow: 'hidden' }}>
+                        <div style={{ width: `${pluginUploadProgress}%`, height: '100%', backgroundColor: 'var(--primary)', transition: 'width 0.1s ease-in-out' }} />
+                      </div>
+                    </div>
+                  )}
+
+                  <button type="submit" className="btn btn-primary" disabled={!pluginUploadFile || pluginUploadLoading}>
+                    {pluginUploadLoading ? `Lade Plugin hoch... ${pluginUploadProgress !== null ? `${pluginUploadProgress}%` : ''}` : 'Plugin hochladen'}
+                  </button>
+                </form>
+
+                <h4 style={{ color: '#fff', marginBottom: '12px', fontSize: '1rem' }}>Hochgeladene Plugins ({plugins.length})</h4>
+                {plugins.length === 0 ? (
+                  <p style={{ color: 'var(--text-muted)', fontSize: '0.9rem' }}>Keine Plugins hochgeladen.</p>
+                ) : (
+                  <div style={{ display: 'flex', flexDirection: 'column', gap: '8px', maxHeight: '350px', overflowY: 'auto', paddingRight: '4px' }}>
+                    {plugins.map((plugin) => (
+                      <div key={plugin.name} className="card" style={{ padding: '12px 16px', display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 0, backgroundColor: 'var(--input-bg)' }}>
+                        <div style={{ display: 'flex', flexDirection: 'column', gap: '4px', overflow: 'hidden' }}>
+                          <span style={{ fontWeight: 600, fontSize: '0.9rem', color: '#fff', textOverflow: 'ellipsis', overflow: 'hidden', whiteSpace: 'nowrap' }} title={plugin.name}>
+                            {plugin.name}
+                          </span>
+                          <span style={{ fontSize: '0.75rem', color: 'var(--text-muted)' }}>
+                            {(plugin.size / (1024 * 1024)).toFixed(2)} MB | {new Date(plugin.createdAt).toLocaleDateString()}
+                          </span>
+                        </div>
+                        <button
+                          className="btn btn-danger"
+                          onClick={() => handleDeleteFile(plugin.name, 'plugin')}
                           style={{ padding: '4px 8px', fontSize: '0.8rem', flexShrink: 0 }}
                         >
                           Löschen

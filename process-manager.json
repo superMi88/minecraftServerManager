@@ -18,19 +18,14 @@
       "description": "Secret key for signing JWT cookies (min 32 chars)"
     },
     {
-      "key": "DISCORD_CLIENT_ID",
+      "key": "LOGIN_USERNAME",
       "type": "credential",
-      "description": "Discord OAuth2 Client ID"
+      "description": "Benutzername für den Admin-Login"
     },
     {
-      "key": "DISCORD_CLIENT_SECRET",
+      "key": "LOGIN_PASSWORD",
       "type": "credential",
-      "description": "Discord OAuth2 Client Secret"
-    },
-    {
-      "key": "DISCORD_REDIRECT_URI",
-      "type": "credential",
-      "description": "Discord OAuth2 Redirect URI (e.g. http://localhost:3000/callback)"
+      "description": "Passwort für den Admin-Login"
     },
     {
       "key": "MINECRAFT_SERVERS_DIR",
