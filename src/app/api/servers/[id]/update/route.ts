@@ -220,9 +220,9 @@ export async function POST(request: NextRequest, { params }: { params: Params })
 
     // 6. Write update_metadata.json for rollback
     const metadata = {
-      previousJarFile: isPaper ? server.jarFile : null,
-      previousCurseForgeZip: !isPaper ? server.curseForgeZip : null,
-      previousStartScript: !isPaper ? server.startScript : null,
+      previousJarFile: isPaper ? (server as import('@prisma/client').MinecraftServer).jarFile : null,
+      previousCurseForgeZip: !isPaper ? (server as import('@prisma/client').CurseForgeServer).curseForgeZip : null,
+      previousStartScript: !isPaper ? (server as import('@prisma/client').CurseForgeServer).startScript : null,
       updatedJarFile: isPaper ? targetJar : null,
       updatedCurseForgeZip: !isPaper ? targetZip : null,
       updateTime: new Date().toISOString(),
@@ -255,8 +255,9 @@ export async function POST(request: NextRequest, { params }: { params: Params })
         const shFiles = files.filter(f => f.endsWith('.sh'));
         if (shFiles.length > 0) {
           // Prefer run.sh or whatever was startScript before if still exists
-          if (server.startScript && shFiles.includes(server.startScript)) {
-            startScript = server.startScript;
+          const cfServer = server as import('@prisma/client').CurseForgeServer;
+          if (cfServer.startScript && shFiles.includes(cfServer.startScript)) {
+            startScript = cfServer.startScript;
           } else {
             startScript = shFiles[0];
           }
