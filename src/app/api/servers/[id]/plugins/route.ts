@@ -12,8 +12,9 @@ export async function GET(request: NextRequest, { params }: { params: Params }) 
     const { id } = await params;
     
     // Check server existence & determine type
-    let server: any = await prisma.minecraftServer.findUnique({ where: { id } });
-    let isPaper = !!server;
+    let server: import('@prisma/client').MinecraftServer | import('@prisma/client').CurseForgeServer | null =
+      await prisma.minecraftServer.findUnique({ where: { id } });
+    const isPaper = !!server;
     if (!server) {
       server = await prisma.curseForgeServer.findUnique({ where: { id } });
     }
@@ -57,8 +58,9 @@ export async function POST(request: NextRequest, { params }: { params: Params })
     }
 
     // Check server existence & determine type
-    let server: any = await prisma.minecraftServer.findUnique({ where: { id } });
-    let isPaper = !!server;
+    let server: import('@prisma/client').MinecraftServer | import('@prisma/client').CurseForgeServer | null =
+      await prisma.minecraftServer.findUnique({ where: { id } });
+    const isPaper = !!server;
     if (!server) {
       server = await prisma.curseForgeServer.findUnique({ where: { id } });
     }
@@ -112,8 +114,9 @@ export async function DELETE(request: NextRequest, { params }: { params: Params 
       return NextResponse.json({ success: false, error: 'Invalid plugin name.' }, { status: 400 });
     }
 
-    let server: any = await prisma.minecraftServer.findUnique({ where: { id } });
-    let isPaper = !!server;
+    let server: import('@prisma/client').MinecraftServer | import('@prisma/client').CurseForgeServer | null =
+      await prisma.minecraftServer.findUnique({ where: { id } });
+    const isPaper = !!server;
     if (!server) {
       server = await prisma.curseForgeServer.findUnique({ where: { id } });
     }

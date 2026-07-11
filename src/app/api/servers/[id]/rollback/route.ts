@@ -12,8 +12,9 @@ export async function POST(request: NextRequest, { params }: { params: Params })
     const { id } = await params;
 
     // Check server existence & determine type
-    let server: any = await prisma.minecraftServer.findUnique({ where: { id } });
-    let isPaper = !!server;
+    let server: import('@prisma/client').MinecraftServer | import('@prisma/client').CurseForgeServer | null =
+      await prisma.minecraftServer.findUnique({ where: { id } });
+    const isPaper = !!server;
     if (!server) {
       server = await prisma.curseForgeServer.findUnique({ where: { id } });
     }
