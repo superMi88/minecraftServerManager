@@ -81,6 +81,8 @@ export async function POST(request: NextRequest, { params }: { params: Params })
             where: { id },
             data: { installed: true },
           });
+        } else {
+          logCallback(`\n[ERROR] Installation fehlgeschlagen: ${installResult.message}\n`);
         }
       }).catch((err) => {
         console.error('Ark Installation failed:', err);

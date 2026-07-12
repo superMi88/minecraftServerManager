@@ -137,34 +137,74 @@ export class ArkHandler implements GameServerHandler {
   // SteamCMD download and server installation logic
   async install(folderPath: string, logCallback: (data: string) => void): Promise<{ success: boolean; message: string }> {
     const isWindows = process.platform === 'win32';
-    if (!isWindows) {
-      return { success: false, message: 'Automatisierte SteamCMD-Installation wird derzeit nur auf Windows unterstützt.' };
-    }
-
     const steamcmdDir = path.join(process.cwd(), 'steamcmd');
-    const steamcmdExe = path.join(steamcmdDir, 'steamcmd.exe');
+    const steamcmdExe = isWindows
+      ? path.join(steamcmdDir, 'steamcmd.exe')
+      : path.join(steamcmdDir, 'steamcmd.sh');
 
     if (!fs.existsSync(steamcmdExe)) {
       logCallback('[System] SteamCMD nicht gefunden. Lade SteamCMD herunter...\n');
       fs.mkdirSync(steamcmdDir, { recursive: true });
 
-      const zipPath = path.join(steamcmdDir, 'steamcmd.zip');
-      const downloadUrl = 'https://steamcdn-a.akamaihd.net/client/installer/steamcmd.zip';
+      if (isWindows) {
+        const zipPath = path.join(steamcmdDir, 'steamcmd.zip');
+        const downloadUrl = 'https://steamcdn-a.akamaihd.net/client/installer/steamcmd.zip';
 
-      try {
-        await this.downloadFile(downloadUrl, zipPath);
-        logCallback('[System] SteamCMD heruntergeladen. Entpacke ZIP...\n');
-        
-        await fs.createReadStream(zipPath)
-          .pipe(unzipper.Extract({ path: steamcmdDir }))
-          .promise();
-        
-        fs.unlinkSync(zipPath);
-        logCallback('[System] SteamCMD erfolgreich eingerichtet.\n');
-      } catch (err) {
-        const msg = err instanceof Error ? err.message : String(err);
-        logCallback(`[ERROR] Fehler beim Einrichten von SteamCMD: ${msg}\n`);
-        return { success: false, message: `SteamCMD setup failed: ${msg}` };
+        try {
+          await this.downloadFile(downloadUrl, zipPath);
+          logCallback('[System] SteamCMD heruntergeladen. Entpacke ZIP...\n');
+          
+          await fs.createReadStream(zipPath)
+            .pipe(unzipper.Extract({ path: steamcmdDir }))
+            .promise();
+          
+          fs.unlinkSync(zipPath);
+          logCallback('[System] SteamCMD erfolgreich eingerichtet.\n');
+        } catch (err) {
+          const msg = err instanceof Error ? err.message : String(err);
+          logCallback(`[ERROR] Fehler beim Einrichten von SteamCMD: ${msg}\n`);
+          return { success: false, message: `SteamCMD setup failed: ${msg}` };
+        }
+      } else {
+        const tarPath = path.join(steamcmdDir, 'steamcmd_linux.tar.gz');
+        const downloadUrl = 'https://steamcdn-a.akamaihd.net/client/installer/steamcmd_linux.tar.gz';
+
+        try {
+          await this.downloadFile(downloadUrl, tarPath);
+          logCallback('[System] SteamCMD (Linux) heruntergeladen. Entpacke TAR.GZ...\n');
+          
+          // Spawn tar to extract
+          await new Promise<void>((resolvePromise, rejectPromise) => {
+            const tarProcess = spawn('tar', ['-xzf', tarPath, '-C', steamcmdDir]);
+            tarProcess.on('close', (code) => {
+              if (code === 0) {
+                resolvePromise();
+              } else {
+                rejectPromise(new Error(`tar process exited with code ${code}`));
+              }
+            });
+            tarProcess.on('error', (err) => {
+              rejectPromise(err);
+            });
+          });
+          
+          fs.unlinkSync(tarPath);
+          
+          // Ensure executable permissions on steamcmd.sh and steamcmd binary
+          try {
+            fs.chmodSync(steamcmdExe, '755');
+            const binaryPath = path.join(steamcmdDir, 'linux32', 'steamcmd');
+            if (fs.existsSync(binaryPath)) {
+              fs.chmodSync(binaryPath, '755');
+            }
+          } catch {}
+          
+          logCallback('[System] SteamCMD erfolgreich eingerichtet.\n');
+        } catch (err) {
+          const msg = err instanceof Error ? err.message : String(err);
+          logCallback(`[ERROR] Fehler beim Einrichten von SteamCMD: ${msg}\n`);
+          return { success: false, message: `SteamCMD setup failed: ${msg}` };
+        }
       }
     }
 
