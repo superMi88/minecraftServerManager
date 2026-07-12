@@ -19,17 +19,17 @@
     },
     {
       "key": "LOGIN_USERNAME",
-      "type": "credential",
+      "type": "textinput",
       "description": "Benutzername für den Admin-Login"
     },
     {
       "key": "LOGIN_PASSWORD",
-      "type": "credential",
+      "type": "textinput",
       "description": "Passwort für den Admin-Login"
     },
     {
       "key": "MINECRAFT_SERVERS_DIR",
-      "type": "credential",
+      "type": "textinput",
       "description": "Directory where Minecraft Server files will be stored (default: ./servers)"
     }
   ]
