@@ -1,7 +1,7 @@
 import React from 'react';
 import { cookies } from 'next/headers';
 import { verifyToken } from '@/lib/auth';
-import { prisma } from '@/lib/db';
+import { findServer } from '@/lib/servers/registry';
 import { redirect } from 'next/navigation';
 import ServerConsoleClient from '@/components/ServerConsoleClient';
 
@@ -33,21 +33,13 @@ export default async function ServerConsolePage({ params }: { params: Params }) 
   }
 
   // Fetch the server details to ensure it exists
-  let server: { name: string } | null = await prisma.minecraftServer.findUnique({
-    where: { id },
-  });
-  let serverType = 'PAPER';
+  const result = await findServer(id);
 
-  if (!server) {
-    server = await prisma.curseForgeServer.findUnique({
-      where: { id },
-    });
-    serverType = 'CURSEFORGE';
-  }
-
-  if (!server) {
+  if (!result) {
     redirect('/');
   }
+
+  const { server, type: serverType } = result;
 
   return <ServerConsoleClient serverId={id} initialServerName={server.name} serverType={serverType} user={user} />;
 }
