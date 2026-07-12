@@ -4,6 +4,7 @@ import { findServer, updateServer, deleteServer } from '@/lib/servers/registry';
 import fs from 'fs';
 import path from 'path';
 import unzipper from 'unzipper';
+import { CurseForgeServer } from '@prisma/client';
 
 type Params = Promise<{ id: string }>;
 
@@ -139,8 +140,9 @@ export async function PATCH(request: NextRequest, { params }: { params: Params }
     }
 
     if (serverType === 'CURSEFORGE') {
+      const cfServer = server as CurseForgeServer;
       if (startScript !== undefined) updateData.startScript = startScript;
-      if (curseForgeZip !== undefined && curseForgeZip !== server.curseForgeZip) {
+      if (curseForgeZip !== undefined && curseForgeZip !== cfServer.curseForgeZip) {
         updateData.curseForgeZip = curseForgeZip;
         if (curseForgeZip) {
           const folderPath = getServerFolderPath(id);

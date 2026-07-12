@@ -5,6 +5,7 @@ import { findServer } from '@/lib/servers/registry';
 import path from 'path';
 import fs from 'fs';
 import unzipper from 'unzipper';
+import { MinecraftServer } from '@prisma/client';
 
 type Params = Promise<{ id: string }>;
 
@@ -21,8 +22,6 @@ export async function POST(request: NextRequest, { params }: { params: Params })
     if (serverType === 'ARK') {
       return NextResponse.json({ success: false, error: 'Uploads werden für Ark-Server nicht über dieses Portal unterstützt. Nutze SteamCMD für Installationen/Updates.' }, { status: 400 });
     }
-
-    server.type = serverType;
 
     const formData = await request.formData();
     const file = formData.get('file') as File | null;
@@ -62,8 +61,9 @@ export async function POST(request: NextRequest, { params }: { params: Params })
 
       if (chunkIndex + 1 === totalChunks) {
         let finalPath = '';
-        if (server.type === 'PAPER') {
-          if (filename.toLowerCase() === 'server.jar' || filename === server.jarFile) {
+        if (serverType === 'PAPER') {
+          const paperServer = server as MinecraftServer;
+          if (filename.toLowerCase() === 'server.jar' || filename === paperServer.jarFile) {
             finalPath = path.join(serverFolder, filename);
           } else {
             if (!filename.toLowerCase().endsWith('.jar')) {
@@ -76,7 +76,7 @@ export async function POST(request: NextRequest, { params }: { params: Params })
             }
             finalPath = path.join(pluginsFolder, filename);
           }
-        } else if (server.type === 'CURSEFORGE') {
+        } else if (serverType === 'CURSEFORGE') {
           if (!filename.toLowerCase().endsWith('.zip')) {
             fs.rmSync(tmpDirPath, { recursive: true, force: true });
             return NextResponse.json({ success: false, error: 'Only .zip files are allowed for CurseForge.' }, { status: 400 });
@@ -104,8 +104,9 @@ export async function POST(request: NextRequest, { params }: { params: Params })
         fs.rmSync(tmpDirPath, { recursive: true, force: true });
 
         // Post-processing
-        if (server.type === 'PAPER') {
-          if (filename.toLowerCase() === 'server.jar' || filename === server.jarFile) {
+        if (serverType === 'PAPER') {
+          const paperServer = server as MinecraftServer;
+          if (filename.toLowerCase() === 'server.jar' || filename === paperServer.jarFile) {
             // Update DB
             await prisma.minecraftServer.update({
               where: { id },
@@ -115,7 +116,7 @@ export async function POST(request: NextRequest, { params }: { params: Params })
           } else {
             return NextResponse.json({ success: true, message: `Plugin "${filename}" uploaded successfully.` });
           }
-        } else if (server.type === 'CURSEFORGE') {
+        } else if (serverType === 'CURSEFORGE') {
           // Extract zip logic in background to prevent HTTP timeouts
           Promise.resolve().then(async () => {
             const logFile = path.join(serverFolder, 'console.txt');
@@ -200,9 +201,10 @@ export async function POST(request: NextRequest, { params }: { params: Params })
       const bytes = await file.arrayBuffer();
       const buffer = Buffer.from(bytes);
 
-      if (server.type === 'PAPER') {
+      if (serverType === 'PAPER') {
+        const paperServer = server as MinecraftServer;
         const filename = file.name;
-        if (filename.toLowerCase() === 'server.jar' || filename === server.jarFile) {
+        if (filename.toLowerCase() === 'server.jar' || filename === paperServer.jarFile) {
           const filePath = path.join(serverFolder, filename);
           fs.writeFileSync(filePath, buffer);
           await prisma.minecraftServer.update({
@@ -222,7 +224,7 @@ export async function POST(request: NextRequest, { params }: { params: Params })
           fs.writeFileSync(filePath, buffer);
           return NextResponse.json({ success: true, message: `Plugin "${filename}" uploaded successfully.` });
         }
-      } else if (server.type === 'CURSEFORGE') {
+      } else if (serverType === 'CURSEFORGE') {
         const filename = file.name;
         if (!filename.toLowerCase().endsWith('.zip')) {
           return NextResponse.json({ success: false, error: 'Only .zip files are allowed for CurseForge.' }, { status: 400 });

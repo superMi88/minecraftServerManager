@@ -2,6 +2,7 @@ import { spawn, exec, ChildProcess } from 'child_process';
 import path from 'path';
 import fs from 'fs';
 import { findServer, getHandler } from './servers/registry';
+import { MinecraftServer } from '@prisma/client';
 
 // Interface for running process tracking
 interface RunningServer {
@@ -131,7 +132,6 @@ export async function startServer(serverId: string) {
   }
 
   const { server, type: serverType } = serverResult;
-  server.type = serverType;
 
   if (runningServers.has(serverId)) {
     return { success: false, message: 'Server is already running.' };
@@ -200,9 +200,10 @@ export async function startServer(serverId: string) {
 
     // If done loading, run automatic op command if set (Minecraft paper specific)
     if (serverType === 'PAPER' && (output.includes('Done') || output.includes('Preparing start region'))) {
-      if (server.opPlayer) {
+      const mcServer = server as MinecraftServer;
+      if (mcServer.opPlayer) {
         setTimeout(() => {
-          sendCommand(serverId, `op ${server.opPlayer}`);
+          sendCommand(serverId, `op ${mcServer.opPlayer}`);
         }, 2000);
       }
     }
