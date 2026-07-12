@@ -6,8 +6,23 @@ import unzipper from 'unzipper';
 import { GameServerHandler, StartResult } from './base';
 import { prisma } from '../db';
 
+interface ArkConfig {
+  id: string;
+  name: string;
+  port: number;
+  queryPort?: number | null;
+  rconPort?: number | null;
+  maxPlayers?: number | null;
+  map?: string | null;
+  serverPassword?: string | null;
+  adminPassword?: string | null;
+  installed: boolean;
+  gameUserSettings?: string | null;
+}
+
 export class ArkHandler implements GameServerHandler {
-  async preStart(folderPath: string, config: any): Promise<void> {
+  async preStart(folderPath: string, config: Record<string, unknown>): Promise<void> {
+    const cfg = config as unknown as ArkConfig;
     // Ensure ini folders exist and sync configs if any
     const iniDir = path.join(folderPath, 'ShooterGame', 'Saved', 'Config', 'WindowsServer');
     if (!fs.existsSync(iniDir)) {
@@ -16,13 +31,14 @@ export class ArkHandler implements GameServerHandler {
 
     const gusPath = path.join(iniDir, 'GameUserSettings.ini');
     if (!fs.existsSync(gusPath)) {
-      const initialGUS = config.gameUserSettings || this.getDefaultGameUserSettings(config);
+      const initialGUS = cfg.gameUserSettings || this.getDefaultGameUserSettings(cfg);
       fs.writeFileSync(gusPath, initialGUS);
     }
   }
 
-  async getStartCommand(folderPath: string, config: any): Promise<StartResult> {
-    if (!config.installed) {
+  async getStartCommand(folderPath: string, config: Record<string, unknown>): Promise<StartResult> {
+    const cfg = config as unknown as ArkConfig;
+    if (!cfg.installed) {
       return { success: false, message: 'Server ist nicht installiert. Bitte führe zuerst die Installation/das Update durch.' };
     }
 
@@ -36,13 +52,13 @@ export class ArkHandler implements GameServerHandler {
     }
 
     // Command line args structure for Ark: Survival Ascended
-    const map = config.map || 'TheIsland_WP';
-    const serverName = config.name;
-    const port = config.port || 7777;
-    const queryPort = config.queryPort || 27015;
-    const maxPlayers = config.maxPlayers || 20;
-    const adminPassword = config.adminPassword || 'adminpass';
-    const serverPassword = config.serverPassword;
+    const map = cfg.map || 'TheIsland_WP';
+    const serverName = cfg.name;
+    const port = cfg.port || 7777;
+    const queryPort = cfg.queryPort || 27015;
+    const maxPlayers = cfg.maxPlayers || 20;
+    const adminPassword = cfg.adminPassword || 'adminpass';
+    const serverPassword = cfg.serverPassword;
 
     let listenOptions = `${map}?listen?SessionName=${serverName}?Port=${port}?QueryPort=${queryPort}?ServerAdminPassword=${adminPassword}?MaxPlayers=${maxPlayers}`;
     if (serverPassword) {
@@ -68,7 +84,8 @@ export class ArkHandler implements GameServerHandler {
     };
   }
 
-  async stop(serverProcess: ChildProcess, folderPath: string): Promise<{ success: boolean; message?: string }> {
+  async stop(serverProcess: ChildProcess, _folderPath: string): Promise<{ success: boolean; message?: string }> {
+    void _folderPath;
     // Ark dedicated server doesn't respond to standard stdin command for stopping cleanly.
     // Usually it requires RCON "saveworld" followed by "quit", or a graceful process termination.
     // Since we don't have RCON fully configured, we will attempt to terminate/kill it gracefully.
@@ -88,27 +105,31 @@ export class ArkHandler implements GameServerHandler {
     }
   }
 
-  async sendCommand(serverProcess: ChildProcess, command: string): Promise<{ success: boolean; message?: string }> {
+  async sendCommand(_serverProcess: ChildProcess, _command: string): Promise<{ success: boolean; message?: string }> {
+    void _serverProcess;
+    void _command;
     // ASA does not read console stdin. It requires RCON commands.
     return { success: false, message: 'Befehle direkt über die Konsole werden für Ark nicht unterstützt. Nutze RCON.' };
   }
 
-  async getProperties(folderPath: string, config: any): Promise<string> {
+  async getProperties(folderPath: string, config: Record<string, unknown>): Promise<string> {
+    const cfg = config as unknown as ArkConfig;
     const iniPath = this.getGameUserSettingsPath(folderPath);
     if (!fs.existsSync(iniPath)) {
-      return config.gameUserSettings || this.getDefaultGameUserSettings(config);
+      return cfg.gameUserSettings || this.getDefaultGameUserSettings(cfg);
     }
     return fs.readFileSync(iniPath, 'utf-8');
   }
 
-  async saveProperties(folderPath: string, content: string, config: any): Promise<void> {
+  async saveProperties(folderPath: string, content: string, config: Record<string, unknown>): Promise<void> {
+    const cfg = config as unknown as ArkConfig;
     const iniPath = this.getGameUserSettingsPath(folderPath);
     fs.mkdirSync(path.dirname(iniPath), { recursive: true });
     fs.writeFileSync(iniPath, content);
 
     // Sync DB cache
     await prisma.arkServer.update({
-      where: { id: config.id },
+      where: { id: cfg.id },
       data: { gameUserSettings: content },
     });
   }
@@ -207,7 +228,7 @@ export class ArkHandler implements GameServerHandler {
     });
   }
 
-  private getDefaultGameUserSettings(config: any): string {
+  private getDefaultGameUserSettings(config: ArkConfig): string {
     return `[ServerSettings]
 ActiveMods=
 DifficultyOffset=1.000000

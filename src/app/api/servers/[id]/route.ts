@@ -1,5 +1,4 @@
 import { NextRequest, NextResponse } from 'next/server';
-import { prisma } from '@/lib/db';
 import { isServerRunning, stopServer, deleteServerFiles, getServerFolderPath } from '@/lib/server-manager';
 import { findServer, updateServer, deleteServer } from '@/lib/servers/registry';
 import fs from 'fs';
@@ -109,7 +108,7 @@ export async function PATCH(request: NextRequest, { params }: { params: Params }
 
     const { server, type: serverType } = result;
 
-    const updateData: any = {};
+    const updateData: Record<string, unknown> = {};
 
     if (port !== undefined) {
       const portInt = parseInt(port, 10);

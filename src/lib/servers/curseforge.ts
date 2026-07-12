@@ -4,14 +4,22 @@ import fs from 'fs';
 import { GameServerHandler, StartResult } from './base';
 import { prisma } from '../db';
 
+interface CurseForgeConfig {
+  id: string;
+  port: number;
+  startScript?: string | null;
+}
+
 export class CurseForgeHandler implements GameServerHandler {
-  async preStart(folderPath: string, config: any): Promise<void> {
+  async preStart(folderPath: string, config: Record<string, unknown>): Promise<void> {
+    const cfg = config as unknown as CurseForgeConfig;
     this.createEula(folderPath);
-    this.createServerProperties(folderPath, config.port);
+    this.createServerProperties(folderPath, cfg.port);
   }
 
-  async getStartCommand(folderPath: string, config: any): Promise<StartResult> {
-    const scriptName = config.startScript || 'run.sh';
+  async getStartCommand(folderPath: string, config: Record<string, unknown>): Promise<StartResult> {
+    const cfg = config as unknown as CurseForgeConfig;
+    const scriptName = cfg.startScript || 'run.sh';
     const scriptPath = path.join(folderPath, scriptName);
 
     if (!fs.existsSync(scriptPath)) {
@@ -50,12 +58,13 @@ export class CurseForgeHandler implements GameServerHandler {
     };
   }
 
-  async stop(process: ChildProcess, folderPath: string): Promise<{ success: boolean; message?: string }> {
+  async stop(process: ChildProcess, _folderPath: string): Promise<{ success: boolean; message?: string }> {
+    void _folderPath;
     try {
       process.stdin?.write('stop\n');
       return { success: true };
-    } catch (e) {
-      return { success: false, message: e instanceof Error ? e.message : String(e) };
+    } catch (error) {
+      return { success: false, message: error instanceof Error ? error.message : String(error) };
     }
   }
 
@@ -63,26 +72,29 @@ export class CurseForgeHandler implements GameServerHandler {
     try {
       process.stdin?.write(command + '\n');
       return { success: true };
-    } catch (e) {
+    } catch (_error) {
+      void _error;
       return { success: false, message: 'Failed to write to stdin.' };
     }
   }
 
-  async getProperties(folderPath: string, config: any): Promise<string> {
+  async getProperties(folderPath: string, config: Record<string, unknown>): Promise<string> {
+    const cfg = config as unknown as CurseForgeConfig;
     const propertiesPath = path.join(folderPath, 'server.properties');
     if (!fs.existsSync(propertiesPath)) {
-      this.createServerProperties(folderPath, config.port);
+      this.createServerProperties(folderPath, cfg.port);
     }
     return fs.readFileSync(propertiesPath, 'utf-8');
   }
 
-  async saveProperties(folderPath: string, content: string, config: any): Promise<void> {
+  async saveProperties(folderPath: string, content: string, config: Record<string, unknown>): Promise<void> {
+    const cfg = config as unknown as CurseForgeConfig;
     const propertiesPath = path.join(folderPath, 'server.properties');
     fs.writeFileSync(propertiesPath, content);
     
     // Sync DB cache
     await prisma.curseForgeServer.update({
-      where: { id: config.id },
+      where: { id: cfg.id },
       data: { serverProperties: content },
     });
   }

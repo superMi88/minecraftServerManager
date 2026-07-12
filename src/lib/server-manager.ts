@@ -1,7 +1,6 @@
 import { spawn, exec, ChildProcess } from 'child_process';
 import path from 'path';
 import fs from 'fs';
-import { prisma } from './db';
 import { findServer, getHandler } from './servers/registry';
 
 // Interface for running process tracking
@@ -234,7 +233,7 @@ export async function stopServer(serverId: string) {
   logToFile(folderPath, `\n[System] Stopping server...\n`);
 
   const handler = getHandler(running.type);
-  const stopResult = await handler.stop(running.process, folderPath);
+  await handler.stop(running.process, folderPath);
 
   // Set timeout to force kill if it doesn't close in 12 seconds
   const forceKillTimeout = setTimeout(() => {
@@ -275,7 +274,7 @@ export function sendCommand(serverId: string, command: string) {
 
   const handler = getHandler(running.type);
   try {
-    const result = handler.sendCommand(running.process, command);
+    handler.sendCommand(running.process, command);
     const folderPath = getServerFolderPath(serverId);
     logToFile(folderPath, `[Sent Command] ${command}\n`);
     return { success: true, message: 'Command sent.' };

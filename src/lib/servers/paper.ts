@@ -4,14 +4,24 @@ import fs from 'fs';
 import { GameServerHandler, StartResult } from './base';
 import { prisma } from '../db';
 
+interface PaperConfig {
+  id: string;
+  port: number;
+  jarFile?: string | null;
+  memoryMax: string;
+  memoryMin: string;
+}
+
 export class PaperHandler implements GameServerHandler {
-  async preStart(folderPath: string, config: any): Promise<void> {
+  async preStart(folderPath: string, config: Record<string, unknown>): Promise<void> {
+    const cfg = config as unknown as PaperConfig;
     this.createEula(folderPath);
-    this.createServerProperties(folderPath, config.port);
+    this.createServerProperties(folderPath, cfg.port);
   }
 
-  async getStartCommand(folderPath: string, config: any): Promise<StartResult> {
-    const jarFile = config.jarFile || 'server.jar';
+  async getStartCommand(folderPath: string, config: Record<string, unknown>): Promise<StartResult> {
+    const cfg = config as unknown as PaperConfig;
+    const jarFile = cfg.jarFile || 'server.jar';
     const jarPath = path.join(folderPath, jarFile);
     if (!fs.existsSync(jarPath)) {
       return { success: false, message: `JAR file ${jarFile} not found in server folder.` };
@@ -21,8 +31,8 @@ export class PaperHandler implements GameServerHandler {
       success: true,
       command: 'java',
       args: [
-        `-Xmx${config.memoryMax}`,
-        `-Xms${config.memoryMin}`,
+        `-Xmx${cfg.memoryMax}`,
+        `-Xms${cfg.memoryMin}`,
         '-jar',
         jarFile,
         'nogui',
@@ -35,12 +45,13 @@ export class PaperHandler implements GameServerHandler {
     };
   }
 
-  async stop(process: ChildProcess, folderPath: string): Promise<{ success: boolean; message?: string }> {
+  async stop(process: ChildProcess, _folderPath: string): Promise<{ success: boolean; message?: string }> {
+    void _folderPath;
     try {
       process.stdin?.write('stop\n');
       return { success: true };
-    } catch (e) {
-      return { success: false, message: e instanceof Error ? e.message : String(e) };
+    } catch (error) {
+      return { success: false, message: error instanceof Error ? error.message : String(error) };
     }
   }
 
@@ -48,26 +59,29 @@ export class PaperHandler implements GameServerHandler {
     try {
       process.stdin?.write(command + '\n');
       return { success: true };
-    } catch (e) {
+    } catch (_error) {
+      void _error;
       return { success: false, message: 'Failed to write to stdin.' };
     }
   }
 
-  async getProperties(folderPath: string, config: any): Promise<string> {
+  async getProperties(folderPath: string, config: Record<string, unknown>): Promise<string> {
+    const cfg = config as unknown as PaperConfig;
     const propertiesPath = path.join(folderPath, 'server.properties');
     if (!fs.existsSync(propertiesPath)) {
-      this.createServerProperties(folderPath, config.port);
+      this.createServerProperties(folderPath, cfg.port);
     }
     return fs.readFileSync(propertiesPath, 'utf-8');
   }
 
-  async saveProperties(folderPath: string, content: string, config: any): Promise<void> {
+  async saveProperties(folderPath: string, content: string, config: Record<string, unknown>): Promise<void> {
+    const cfg = config as unknown as PaperConfig;
     const propertiesPath = path.join(folderPath, 'server.properties');
     fs.writeFileSync(propertiesPath, content);
     
     // Sync DB cache
     await prisma.minecraftServer.update({
-      where: { id: config.id },
+      where: { id: cfg.id },
       data: { serverProperties: content },
     });
   }

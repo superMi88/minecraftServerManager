@@ -3,6 +3,9 @@ import { GameServerHandler } from './base';
 import { PaperHandler } from './paper';
 import { CurseForgeHandler } from './curseforge';
 import { ArkHandler } from './ark';
+import { MinecraftServer, CurseForgeServer, ArkServer } from '@prisma/client';
+
+export type ServerUnion = MinecraftServer | CurseForgeServer | ArkServer;
 
 const handlers: Record<string, GameServerHandler> = {
   PAPER: new PaperHandler(),
@@ -18,17 +21,17 @@ export function getHandler(type: string): GameServerHandler {
   return handler;
 }
 
-export async function findServer(id: string): Promise<{ server: any; type: 'PAPER' | 'CURSEFORGE' | 'ARK' } | null> {
+export async function findServer(id: string): Promise<{ server: ServerUnion; type: 'PAPER' | 'CURSEFORGE' | 'ARK' } | null> {
   // Try Paper
-  let server: any = await prisma.minecraftServer.findUnique({ where: { id } });
-  if (server) {
-    return { server, type: 'PAPER' };
+  const paperServer = await prisma.minecraftServer.findUnique({ where: { id } });
+  if (paperServer) {
+    return { server: paperServer, type: 'PAPER' };
   }
 
   // Try CurseForge
-  server = await prisma.curseForgeServer.findUnique({ where: { id } });
-  if (server) {
-    return { server, type: 'CURSEFORGE' };
+  const cfServer = await prisma.curseForgeServer.findUnique({ where: { id } });
+  if (cfServer) {
+    return { server: cfServer, type: 'CURSEFORGE' };
   }
 
   // Try Ark
@@ -50,7 +53,7 @@ export async function deleteServer(id: string, type: 'PAPER' | 'CURSEFORGE' | 'A
   }
 }
 
-export async function updateServer(id: string, type: 'PAPER' | 'CURSEFORGE' | 'ARK', data: any): Promise<any> {
+export async function updateServer(id: string, type: 'PAPER' | 'CURSEFORGE' | 'ARK', data: Record<string, unknown>): Promise<ServerUnion | null> {
   if (type === 'PAPER') {
     return await prisma.minecraftServer.update({
       where: { id },
@@ -67,9 +70,10 @@ export async function updateServer(id: string, type: 'PAPER' | 'CURSEFORGE' | 'A
       data,
     });
   }
+  return null;
 }
 
-export async function getAllServers(): Promise<any[]> {
+export async function getAllServers(): Promise<(ServerUnion & { type: 'PAPER' | 'CURSEFORGE' | 'ARK' })[]> {
   const [paperServers, cfServers, arkServers] = await Promise.all([
     prisma.minecraftServer.findMany(),
     prisma.curseForgeServer.findMany(),

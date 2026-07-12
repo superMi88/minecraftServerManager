@@ -1,7 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { prisma } from '@/lib/db';
 import { isServerRunning, getServerFolderPath } from '@/lib/server-manager';
-import { getAllServers, getHandler } from '@/lib/servers/registry';
+import { getAllServers, getHandler, ServerUnion } from '@/lib/servers/registry';
 import fs from 'fs';
 import path from 'path';
 import unzipper from 'unzipper';
@@ -64,7 +64,7 @@ export async function POST(request: NextRequest) {
     }
 
     // Create database entry based on type
-    let newServer: any;
+    let newServer: ServerUnion & { type?: 'PAPER' | 'CURSEFORGE' | 'ARK' };
     if (type === 'PAPER') {
       newServer = await prisma.minecraftServer.create({
         data: {
