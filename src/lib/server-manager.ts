@@ -2,6 +2,7 @@ import { spawn, exec, ChildProcess } from 'child_process';
 import path from 'path';
 import fs from 'fs';
 import { prisma } from './db';
+import { findServer, getHandler } from './servers/registry';
 
 // Interface for running process tracking
 interface RunningServer {
@@ -125,35 +126,12 @@ eula=true`;
 }
 
 export async function startServer(serverId: string) {
-  let server: {
-    id: string;
-    name: string;
-    port: number;
-    memoryMin: string;
-    memoryMax: string;
-    opPlayer: string | null;
-    serverProperties: string | null;
-    jarFile?: string | null;
-    curseForgeZip?: string | null;
-    startScript?: string;
-    type?: string;
-  } | null = await prisma.minecraftServer.findUnique({
-    where: { id: serverId },
-  });
-  let serverType = 'PAPER';
-
-  if (!server) {
-    server = await prisma.curseForgeServer.findUnique({
-      where: { id: serverId },
-    });
-    serverType = 'CURSEFORGE';
-  }
-
-  if (!server) {
+  const serverResult = await findServer(serverId);
+  if (!serverResult) {
     throw new Error('Server not found in database.');
   }
 
-  // Inject type field dynamically to keep downstream logic compatible
+  const { server, type: serverType } = serverResult;
   server.type = serverType;
 
   if (runningServers.has(serverId)) {
@@ -167,21 +145,9 @@ export async function startServer(serverId: string) {
 
   if (runningServerWithSamePort) {
     let conflictingServerName = 'Ein anderer Server';
-    const paperConflict = await prisma.minecraftServer.findUnique({
-      where: { id: runningServerWithSamePort.serverId },
-      select: { name: true }
-    });
-
-    if (paperConflict) {
-      conflictingServerName = paperConflict.name;
-    } else {
-      const cfConflict = await prisma.curseForgeServer.findUnique({
-        where: { id: runningServerWithSamePort.serverId },
-        select: { name: true }
-      });
-      if (cfConflict) {
-        conflictingServerName = cfConflict.name;
-      }
+    const conflictResult = await findServer(runningServerWithSamePort.serverId);
+    if (conflictResult) {
+      conflictingServerName = conflictResult.server.name;
     }
 
     return {
@@ -195,85 +161,47 @@ export async function startServer(serverId: string) {
     fs.mkdirSync(folderPath, { recursive: true });
   }
 
-  createEula(folderPath);
-  createServerProperties(folderPath, server.port);
+  const handler = getHandler(serverType);
+  if (handler.preStart) {
+    await handler.preStart(folderPath, server);
+  }
 
   // Clear previous log file
   const logFile = path.join(folderPath, 'console.txt');
   fs.writeFileSync(logFile, '');
 
-  const isWindows = process.platform === 'win32';
-  let command = '';
-  let args: string[] = [];
-
-  if (server.type === 'PAPER') {
-    const jarFile = server.jarFile || 'server.jar';
-    const jarPath = path.join(folderPath, jarFile);
-    if (!fs.existsSync(jarPath)) {
-      return { success: false, message: `JAR file ${jarFile} not found in server folder.` };
-    }
-
-    command = 'java';
-    args = [
-      `-Xmx${server.memoryMax}`,
-      `-Xms${server.memoryMin}`,
-      '-jar',
-      jarFile,
-      'nogui',
-    ];
-  } else if (server.type === 'CURSEFORGE') {
-    const scriptName = server.startScript || 'run.sh';
-    const scriptPath = path.join(folderPath, scriptName);
-
-    if (!fs.existsSync(scriptPath)) {
-      return { success: false, message: `Execution script ${scriptName} not found. Please upload/unpack CurseForge modpack.` };
-    }
-
-    if (!isWindows) {
-      try {
-        fs.chmodSync(scriptPath, '755'); // Make executable
-      } catch (err) {
-        console.error(`Failed to chmod ${scriptPath}:`, err);
-      }
-    }
-
-    if (scriptName.endsWith('.sh')) {
-      command = isWindows ? 'bash' : '/bin/bash';
-      args = [scriptName];
-    } else {
-      command = isWindows ? 'powershell.exe' : '/bin/bash';
-      args = isWindows ? ['-ExecutionPolicy', 'Bypass', '-File', scriptPath] : [scriptPath];
-    }
-  } else {
-    return { success: false, message: 'Invalid server type.' };
+  const startCmdResult = await handler.getStartCommand(folderPath, server);
+  if (!startCmdResult.success) {
+    return { success: false, message: startCmdResult.message || 'Start command generation failed.' };
   }
 
-  console.log(`Starting Minecraft server (${server.name}) in ${folderPath} with cmd: ${command} ${args.join(' ')}`);
+  const { command, args, options } = startCmdResult;
 
-  const mcProcess = spawn(command, args, {
+  console.log(`Starting server (${server.name}) of type ${serverType} in ${folderPath} with cmd: ${command} ${args?.join(' ')}`);
+
+  const serverProcess = spawn(command!, args || [], options || {
     cwd: folderPath,
     env: process.env,
     shell: true,
   });
 
   runningServers.set(serverId, {
-    process: mcProcess,
+    process: serverProcess,
     serverId,
-    type: server.type,
+    type: serverType,
     port: server.port,
   });
 
   logToFile(folderPath, `[System] Server starting...\n`);
 
-  mcProcess.stdout?.on('data', (data) => {
+  serverProcess.stdout?.on('data', (data) => {
     const output = data.toString();
     logToFile(folderPath, output);
-    console.log(`[Minecraft ${server.name}] ${output.trim()}`);
+    console.log(`[${serverType} ${server.name}] ${output.trim()}`);
 
-    // If done loading, run automatic op command if set
-    if (output.includes('Done') || output.includes('Preparing start region')) {
+    // If done loading, run automatic op command if set (Minecraft paper specific)
+    if (serverType === 'PAPER' && (output.includes('Done') || output.includes('Preparing start region'))) {
       if (server.opPlayer) {
-        // execute with a tiny delay to ensure command can be processed
         setTimeout(() => {
           sendCommand(serverId, `op ${server.opPlayer}`);
         }, 2000);
@@ -281,15 +209,15 @@ export async function startServer(serverId: string) {
     }
   });
 
-  mcProcess.stderr?.on('data', (data) => {
+  serverProcess.stderr?.on('data', (data) => {
     const output = data.toString();
     logToFile(folderPath, `[ERROR] ${output}`);
-    console.error(`[Minecraft Error ${server.name}] ${output.trim()}`);
+    console.error(`[${serverType} Error ${server.name}] ${output.trim()}`);
   });
 
-  mcProcess.on('exit', (code) => {
+  serverProcess.on('exit', (code) => {
     logToFile(folderPath, `\n[System] Server exited with code: ${code}\n`);
-    console.log(`[Minecraft ${server.name}] Exited with code ${code}`);
+    console.log(`[${serverType} ${server.name}] Exited with code ${code}`);
     runningServers.delete(serverId);
   });
 
@@ -297,20 +225,16 @@ export async function startServer(serverId: string) {
 }
 
 export async function stopServer(serverId: string) {
-  const server = runningServers.get(serverId);
-  if (!server) {
+  const running = runningServers.get(serverId);
+  if (!running) {
     return { success: false, message: 'Server is not running.' };
   }
 
   const folderPath = getServerFolderPath(serverId);
   logToFile(folderPath, `\n[System] Stopping server...\n`);
 
-  // Send standard stop command to stdin
-  try {
-    server.process.stdin?.write('stop\n');
-  } catch (e) {
-    console.error('Failed to write stop command to stdin:', e);
-  }
+  const handler = getHandler(running.type);
+  const stopResult = await handler.stop(running.process, folderPath);
 
   // Set timeout to force kill if it doesn't close in 12 seconds
   const forceKillTimeout = setTimeout(() => {
@@ -332,10 +256,10 @@ export async function stopServer(serverId: string) {
       }
       runningServers.delete(serverId);
     }
-  }, 12000);
+  }, running.type === 'ARK' ? 20000 : 12000);
 
   // Monitor process exit to clear force kill timer
-  server.process.on('exit', () => {
+  running.process.on('exit', () => {
     clearTimeout(forceKillTimeout);
     runningServers.delete(serverId);
   });
@@ -344,13 +268,14 @@ export async function stopServer(serverId: string) {
 }
 
 export function sendCommand(serverId: string, command: string) {
-  const server = runningServers.get(serverId);
-  if (!server || server.process.killed) {
+  const running = runningServers.get(serverId);
+  if (!running || running.process.killed) {
     return { success: false, message: 'Server is not running.' };
   }
 
+  const handler = getHandler(running.type);
   try {
-    server.process.stdin?.write(command + '\n');
+    const result = handler.sendCommand(running.process, command);
     const folderPath = getServerFolderPath(serverId);
     logToFile(folderPath, `[Sent Command] ${command}\n`);
     return { success: true, message: 'Command sent.' };

@@ -35,3 +35,21 @@ model CurseForgeServer {
   updatedAt        DateTime @updatedAt
 }
 
+model ArkServer {
+  id               String   @id @default(uuid())
+  name             String   @unique
+  port             Int      @default(7777)
+  queryPort        Int      @default(27015)
+  rconPort         Int      @default(27020)
+  maxPlayers       Int      @default(20)
+  map              String   @default("TheIsland_WP")
+  serverPassword   String?
+  adminPassword    String   @default("adminpass")
+  installed        Boolean  @default(false)
+  gameUserSettings String?  // GameUserSettings.ini content
+  gameIni          String?  // Game.ini content
+  createdAt        DateTime @default(now())
+  updatedAt        DateTime @updatedAt
+}
+
+

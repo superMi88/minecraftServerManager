@@ -1,36 +1,22 @@
 import { NextRequest, NextResponse } from 'next/server';
-import { prisma } from '@/lib/db';
-import { getServerFolderPath, createServerProperties } from '@/lib/server-manager';
-import path from 'path';
-import fs from 'fs';
+import { getServerFolderPath } from '@/lib/server-manager';
+import { findServer, getHandler } from '@/lib/servers/registry';
 
 type Params = Promise<{ id: string }>;
 
 export async function GET(request: NextRequest, { params }: { params: Params }) {
   try {
     const { id } = await params;
-    let server: { port: number } | null = await prisma.minecraftServer.findUnique({
-      where: { id },
-    });
+    const result = await findServer(id);
 
-    if (!server) {
-      server = await prisma.curseForgeServer.findUnique({
-        where: { id },
-      });
+    if (!result) {
+      return NextResponse.json({ success: false, error: 'Server nicht gefunden.' }, { status: 404 });
     }
 
-    if (!server) {
-      return NextResponse.json({ success: false, error: 'Server not found.' }, { status: 404 });
-    }
+    const { server, type } = result;
+    const handler = getHandler(type);
+    const content = await handler.getProperties(getServerFolderPath(id), server);
 
-    const folderPath = getServerFolderPath(id);
-    const propertiesPath = path.join(folderPath, 'server.properties');
-
-    if (!fs.existsSync(propertiesPath)) {
-      createServerProperties(folderPath, server.port);
-    }
-
-    const content = fs.readFileSync(propertiesPath, 'utf-8');
     return NextResponse.json({ success: true, content });
   } catch (error) {
     const message = error instanceof Error ? error.message : String(error);
@@ -48,41 +34,17 @@ export async function POST(request: NextRequest, { params }: { params: Params })
       return NextResponse.json({ success: false, error: 'Content parameter is required.' }, { status: 400 });
     }
 
-    let server: { id: string } | null = await prisma.minecraftServer.findUnique({
-      where: { id },
-    });
-    let serverType = 'PAPER';
+    const result = await findServer(id);
 
-    if (!server) {
-      server = await prisma.curseForgeServer.findUnique({
-        where: { id },
-      });
-      serverType = 'CURSEFORGE';
+    if (!result) {
+      return NextResponse.json({ success: false, error: 'Server nicht gefunden.' }, { status: 404 });
     }
 
-    if (!server) {
-      return NextResponse.json({ success: false, error: 'Server not found.' }, { status: 404 });
-    }
+    const { server, type } = result;
+    const handler = getHandler(type);
+    await handler.saveProperties(getServerFolderPath(id), content, server);
 
-    const folderPath = getServerFolderPath(id);
-    const propertiesPath = path.join(folderPath, 'server.properties');
-
-    fs.writeFileSync(propertiesPath, content);
-
-    // Sync database cache if necessary
-    if (serverType === 'PAPER') {
-      await prisma.minecraftServer.update({
-        where: { id },
-        data: { serverProperties: content },
-      });
-    } else {
-      await prisma.curseForgeServer.update({
-        where: { id },
-        data: { serverProperties: content },
-      });
-    }
-
-    return NextResponse.json({ success: true, message: 'server.properties saved successfully.' });
+    return NextResponse.json({ success: true, message: 'Einstellungen erfolgreich gespeichert.' });
   } catch (error) {
     const message = error instanceof Error ? error.message : String(error);
     return NextResponse.json({ success: false, error: message }, { status: 500 });

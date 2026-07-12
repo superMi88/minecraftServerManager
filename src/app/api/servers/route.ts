@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { prisma } from '@/lib/db';
-import { isServerRunning, createServerProperties, createEula, getServerFolderPath } from '@/lib/server-manager';
+import { isServerRunning, getServerFolderPath } from '@/lib/server-manager';
+import { getAllServers, getHandler } from '@/lib/servers/registry';
 import fs from 'fs';
 import path from 'path';
 import unzipper from 'unzipper';
@@ -8,13 +9,7 @@ import unzipper from 'unzipper';
 // GET all servers
 export async function GET() {
   try {
-    const paperServers = await prisma.minecraftServer.findMany();
-    const cfServers = await prisma.curseForgeServer.findMany();
-
-    const dbServers = [
-      ...paperServers.map((s) => ({ ...s, type: 'PAPER' as const })),
-      ...cfServers.map((s) => ({ ...s, type: 'CURSEFORGE' as const })),
-    ].sort((a, b) => b.createdAt.getTime() - a.createdAt.getTime());
+    const dbServers = await getAllServers();
 
     const serversWithStatus = dbServers.map((server) => ({
       ...server,
@@ -33,7 +28,22 @@ export async function GET() {
 export async function POST(request: NextRequest) {
   try {
     const body = await request.json();
-    const { name, type, port, memoryMin, memoryMax, jarFile, opPlayer, curseForgeZip } = body;
+    const {
+      name,
+      type,
+      port,
+      memoryMin,
+      memoryMax,
+      jarFile,
+      opPlayer,
+      curseForgeZip,
+      queryPort,
+      rconPort,
+      maxPlayers,
+      map,
+      serverPassword,
+      adminPassword
+    } = body;
 
     if (!name || !type || !port) {
       return NextResponse.json({ success: false, error: 'Name, Type, and Port are required.' }, { status: 400 });
@@ -45,24 +55,16 @@ export async function POST(request: NextRequest) {
       return NextResponse.json({ success: false, error: 'Port must be a valid number.' }, { status: 400 });
     }
 
-    // Check if name or port is already used across both tables
+    // Check if name or port is already used across all tables
     const nameExistsInPaper = await prisma.minecraftServer.findUnique({ where: { name } });
     const nameExistsInCF = await prisma.curseForgeServer.findUnique({ where: { name } });
-    if (nameExistsInPaper || nameExistsInCF) {
+    const nameExistsInArk = await prisma.arkServer.findUnique({ where: { name } });
+    if (nameExistsInPaper || nameExistsInCF || nameExistsInArk) {
       return NextResponse.json({ success: false, error: 'A server with this name already exists.' }, { status: 400 });
     }
 
-
     // Create database entry based on type
-    let newServer: {
-      id: string;
-      name: string;
-      port: number;
-      memoryMin: string;
-      memoryMax: string;
-      type?: string;
-      opPlayer: string | null;
-    };
+    let newServer: any;
     if (type === 'PAPER') {
       newServer = await prisma.minecraftServer.create({
         data: {
@@ -88,6 +90,21 @@ export async function POST(request: NextRequest) {
         },
       });
       newServer.type = 'CURSEFORGE';
+    } else if (type === 'ARK') {
+      newServer = await prisma.arkServer.create({
+        data: {
+          name,
+          port: portInt,
+          queryPort: queryPort ? parseInt(queryPort, 10) : 27015,
+          rconPort: rconPort ? parseInt(rconPort, 10) : 27020,
+          maxPlayers: maxPlayers ? parseInt(maxPlayers, 10) : 20,
+          map: map || 'TheIsland_WP',
+          serverPassword: serverPassword || null,
+          adminPassword: adminPassword || 'adminpass',
+          installed: false,
+        },
+      });
+      newServer.type = 'ARK';
     } else {
       return NextResponse.json({ success: false, error: 'Invalid server type.' }, { status: 400 });
     }
@@ -98,9 +115,11 @@ export async function POST(request: NextRequest) {
       fs.mkdirSync(folderPath, { recursive: true });
     }
 
-    // Write initial files
-    createEula(folderPath);
-    createServerProperties(folderPath, portInt);
+    // Setup initial properties
+    const handler = getHandler(type);
+    if (handler.preStart) {
+      await handler.preStart(folderPath, newServer);
+    }
 
     // Copy selected files or extract modpack if selected
     if (type === 'PAPER' && jarFile) {
@@ -117,7 +136,6 @@ export async function POST(request: NextRequest) {
           const entries = directory.files;
 
           if (entries.length > 0) {
-            // Find if there's a common root folder in the zip file
             const firstEntryPath = entries[0].path;
             const rootFolder = firstEntryPath.split('/')[0];
             
@@ -129,7 +147,6 @@ export async function POST(request: NextRequest) {
               }
             }
 
-            // Extract each entry
             for (const entry of entries) {
               let relativePath = entry.path;
               if (allHaveCommonRoot && relativePath.startsWith(rootFolder + '/')) {

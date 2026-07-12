@@ -1,6 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server';
-import { prisma } from '@/lib/db';
 import { isServerRunning, getServerFolderPath } from '@/lib/server-manager';
+import { findServer } from '@/lib/servers/registry';
 import fs from 'fs';
 import path from 'path';
 import AdmZip from 'adm-zip';
@@ -35,12 +35,14 @@ export async function GET(request: NextRequest, { params }: { params: Params }) 
     const { id } = await params;
 
     // Check server existence
-    let server: { id: string; name: string } | null = await prisma.minecraftServer.findUnique({ where: { id } });
-    if (!server) {
-      server = await prisma.curseForgeServer.findUnique({ where: { id } });
+    const result = await findServer(id);
+    if (!result) {
+      return NextResponse.json({ success: false, error: 'Server nicht gefunden.' }, { status: 404 });
     }
-    if (!server) {
-      return NextResponse.json({ success: false, error: 'Server not found.' }, { status: 404 });
+
+    const { type: serverType } = result;
+    if (serverType === 'ARK') {
+      return NextResponse.json({ success: true, backups: [] });
     }
 
     const serverFolder = getServerFolderPath(id);
@@ -78,12 +80,14 @@ export async function POST(request: NextRequest, { params }: { params: Params })
     const { id } = await params;
 
     // Check server existence
-    let server: { id: string; name: string } | null = await prisma.minecraftServer.findUnique({ where: { id } });
-    if (!server) {
-      server = await prisma.curseForgeServer.findUnique({ where: { id } });
+    const result = await findServer(id);
+    if (!result) {
+      return NextResponse.json({ success: false, error: 'Server nicht gefunden.' }, { status: 404 });
     }
-    if (!server) {
-      return NextResponse.json({ success: false, error: 'Server not found.' }, { status: 404 });
+
+    const { type: serverType } = result;
+    if (serverType === 'ARK') {
+      return NextResponse.json({ success: false, error: 'Backups werden für Ark-Server derzeit nicht unterstützt.' }, { status: 400 });
     }
 
     // Check if server is running

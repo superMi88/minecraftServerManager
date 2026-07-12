@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { prisma } from '@/lib/db';
 import { isServerRunning, getServerFolderPath } from '@/lib/server-manager';
+import { findServer } from '@/lib/servers/registry';
 import fs from 'fs';
 import path from 'path';
 
@@ -12,15 +13,17 @@ export async function POST(request: NextRequest, { params }: { params: Params })
     const { id } = await params;
 
     // Check server existence & determine type
-    let server: import('@prisma/client').MinecraftServer | import('@prisma/client').CurseForgeServer | null =
-      await prisma.minecraftServer.findUnique({ where: { id } });
-    const isPaper = !!server;
-    if (!server) {
-      server = await prisma.curseForgeServer.findUnique({ where: { id } });
-    }
-    if (!server) {
+    const result = await findServer(id);
+    if (!result) {
       return NextResponse.json({ success: false, error: 'Server nicht gefunden.' }, { status: 404 });
     }
+
+    const { type: serverType } = result;
+    if (serverType === 'ARK') {
+      return NextResponse.json({ success: false, error: 'Rollback wird für Ark-Server nicht unterstützt.' }, { status: 400 });
+    }
+
+    const isPaper = serverType === 'PAPER';
 
     // Check if server is running
     if (isServerRunning(id)) {

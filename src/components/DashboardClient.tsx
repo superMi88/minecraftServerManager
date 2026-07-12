@@ -13,7 +13,7 @@ interface User {
 interface Server {
   id: string;
   name: string;
-  type: 'PAPER' | 'CURSEFORGE';
+  type: 'PAPER' | 'CURSEFORGE' | 'ARK';
   port: number;
   memoryMin: string;
   memoryMax: string;
@@ -21,6 +21,8 @@ interface Server {
   opPlayer: string | null;
   isRunning: boolean;
   createdAt: string;
+  map?: string;
+  queryPort?: number;
 }
 
 const uploadInChunks = async (
@@ -72,13 +74,22 @@ export default function DashboardClient({ user }: { user: User }) {
   // Modal state
   const [modalOpen, setModalOpen] = useState(false);
   const [name, setName] = useState('');
-  const [type, setType] = useState<'PAPER' | 'CURSEFORGE'>('PAPER');
+  const [type, setType] = useState<'PAPER' | 'CURSEFORGE' | 'ARK'>('PAPER');
   const [port, setPort] = useState('25565');
   const [memoryMin, setMemoryMin] = useState('2048M');
   const [memoryMax, setMemoryMax] = useState('6144M');
   const [jarFile, setJarFile] = useState('server.jar');
   const [curseForgeZip, setCurseForgeZip] = useState('');
   const [opPlayer, setOpPlayer] = useState('');
+  
+  // Ark specific states
+  const [queryPort, setQueryPort] = useState('27015');
+  const [rconPort, setRconPort] = useState('27020');
+  const [maxPlayers, setMaxPlayers] = useState('20');
+  const [map, setMap] = useState('TheIsland_WP');
+  const [serverPassword, setServerPassword] = useState('');
+  const [adminPassword, setAdminPassword] = useState('adminpass');
+
   const [createLoading, setCreateLoading] = useState(false);
   const [createError, setCreateError] = useState<string | null>(null);
 
@@ -197,11 +208,17 @@ export default function DashboardClient({ user }: { user: User }) {
           name,
           type,
           port,
-          memoryMin,
-          memoryMax,
+          memoryMin: type !== 'ARK' ? memoryMin : undefined,
+          memoryMax: type !== 'ARK' ? memoryMax : undefined,
           jarFile: type === 'PAPER' ? jarFile : undefined,
           curseForgeZip: type === 'CURSEFORGE' ? curseForgeZip : undefined,
-          opPlayer: opPlayer || undefined,
+          opPlayer: type !== 'ARK' ? opPlayer || undefined : undefined,
+          queryPort: type === 'ARK' ? queryPort : undefined,
+          rconPort: type === 'ARK' ? rconPort : undefined,
+          maxPlayers: type === 'ARK' ? maxPlayers : undefined,
+          map: type === 'ARK' ? map : undefined,
+          serverPassword: type === 'ARK' ? serverPassword || undefined : undefined,
+          adminPassword: type === 'ARK' ? adminPassword : undefined,
         }),
       });
       const data = await res.json();
@@ -216,6 +233,12 @@ export default function DashboardClient({ user }: { user: User }) {
         setJarFile('server.jar');
         setCurseForgeZip('');
         setOpPlayer('');
+        setQueryPort('27015');
+        setRconPort('27020');
+        setMaxPlayers('20');
+        setMap('TheIsland_WP');
+        setServerPassword('');
+        setAdminPassword('adminpass');
         fetchServers(); // reload list
       } else {
         setCreateError(data.error || 'Failed to create server.');
@@ -420,14 +443,23 @@ export default function DashboardClient({ user }: { user: User }) {
                 <div className="server-card-meta">
                   <span>Typ:</span>
                   <span style={{ color: '#fff', fontWeight: 600 }}>
-                    {server.type === 'PAPER' ? 'Paper (Vanilla/Plugins)' : 'CurseForge Modpack'}
+                    {server.type === 'PAPER' ? 'Paper (Vanilla/Plugins)' : server.type === 'CURSEFORGE' ? 'CurseForge Modpack' : 'Ark: Survival Ascended'}
                   </span>
                   
                   <span>Port:</span>
                   <span style={{ color: '#fff', fontWeight: 600 }}>{server.port}</span>
                   
-                  <span>RAM:</span>
-                  <span style={{ color: '#fff', fontWeight: 600 }}>{server.memoryMin} - {server.memoryMax}</span>
+                  {server.type !== 'ARK' ? (
+                    <>
+                      <span>RAM:</span>
+                      <span style={{ color: '#fff', fontWeight: 600 }}>{server.memoryMin} - {server.memoryMax}</span>
+                    </>
+                  ) : (
+                    <>
+                      <span>Karte:</span>
+                      <span style={{ color: '#fff', fontWeight: 600 }}>{server.map || 'TheIsland_WP'}</span>
+                    </>
+                  )}
                 </div>
 
                 <div className="server-card-actions">
@@ -774,10 +806,19 @@ export default function DashboardClient({ user }: { user: User }) {
                   <select
                     className="form-select"
                     value={type}
-                    onChange={(e) => setType(e.target.value as 'PAPER' | 'CURSEFORGE')}
+                    onChange={(e) => {
+                      const newType = e.target.value as 'PAPER' | 'CURSEFORGE' | 'ARK';
+                      setType(newType);
+                      if (newType === 'ARK') {
+                        setPort('7777');
+                      } else {
+                        setPort('25565');
+                      }
+                    }}
                   >
                     <option value="PAPER">Paper Minecraft (Standard/Plugins)</option>
                     <option value="CURSEFORGE">CurseForge Modpack Server</option>
+                    <option value="ARK">Ark: Survival Ascended Server</option>
                   </select>
                 </div>
 
@@ -788,37 +829,113 @@ export default function DashboardClient({ user }: { user: User }) {
                     className="form-input"
                     value={port}
                     onChange={(e) => setPort(e.target.value)}
-                    placeholder="25565"
+                    placeholder={type === 'ARK' ? '7777' : '25565'}
                     required
                   />
                 </div>
               </div>
 
-              <div className="grid-2">
-                <div className="form-group">
-                  <label className="form-label">Minimaler RAM (Java -Xms)</label>
-                  <input
-                    type="text"
-                    className="form-input"
-                    value={memoryMin}
-                    onChange={(e) => setMemoryMin(e.target.value)}
-                    placeholder="z.B. 2048M oder 2G"
-                    required
-                  />
-                </div>
+              {type !== 'ARK' ? (
+                <div className="grid-2">
+                  <div className="form-group">
+                    <label className="form-label">Minimaler RAM (Java -Xms)</label>
+                    <input
+                      type="text"
+                      className="form-input"
+                      value={memoryMin}
+                      onChange={(e) => setMemoryMin(e.target.value)}
+                      placeholder="z.B. 2048M oder 2G"
+                      required
+                    />
+                  </div>
 
-                <div className="form-group">
-                  <label className="form-label">Maximaler RAM (Java -Xmx)</label>
-                  <input
-                    type="text"
-                    className="form-input"
-                    value={memoryMax}
-                    onChange={(e) => setMemoryMax(e.target.value)}
-                    placeholder="z.B. 6144M oder 6G"
-                    required
-                  />
+                  <div className="form-group">
+                    <label className="form-label">Maximaler RAM (Java -Xmx)</label>
+                    <input
+                      type="text"
+                      className="form-input"
+                      value={memoryMax}
+                      onChange={(e) => setMemoryMax(e.target.value)}
+                      placeholder="z.B. 6144M oder 6G"
+                      required
+                    />
+                  </div>
                 </div>
-              </div>
+              ) : (
+                <>
+                  <div className="grid-2">
+                    <div className="form-group">
+                      <label className="form-label">Query Port (Steam-Browser)</label>
+                      <input
+                        type="number"
+                        className="form-input"
+                        value={queryPort}
+                        onChange={(e) => setQueryPort(e.target.value)}
+                        placeholder="27015"
+                        required
+                      />
+                    </div>
+                    <div className="form-group">
+                      <label className="form-label">RCON Port (Admin)</label>
+                      <input
+                        type="number"
+                        className="form-input"
+                        value={rconPort}
+                        onChange={(e) => setRconPort(e.target.value)}
+                        placeholder="27020"
+                        required
+                      />
+                    </div>
+                  </div>
+                  <div className="grid-2">
+                    <div className="form-group">
+                      <label className="form-label">Karte / Map</label>
+                      <input
+                        type="text"
+                        className="form-input"
+                        value={map}
+                        onChange={(e) => setMap(e.target.value)}
+                        placeholder="TheIsland_WP"
+                        required
+                      />
+                    </div>
+                    <div className="form-group">
+                      <label className="form-label">Max. Spieler</label>
+                      <input
+                        type="number"
+                        className="form-input"
+                        value={maxPlayers}
+                        onChange={(e) => setMaxPlayers(e.target.value)}
+                        placeholder="20"
+                        required
+                      />
+                    </div>
+                  </div>
+                  <div className="grid-2">
+                    <div className="form-group">
+                      <label className="form-label">Server Passwort (Beitritt)</label>
+                      <input
+                        type="text"
+                        className="form-input"
+                        value={serverPassword}
+                        onChange={(e) => setServerPassword(e.target.value)}
+                        placeholder="Freilassen für kein Passwort"
+                      />
+                    </div>
+                    <div className="form-group">
+                      <label className="form-label">Admin Passwort</label>
+                      <input
+                        type="text"
+                        className="form-input"
+                        value={adminPassword}
+                        onChange={(e) => setAdminPassword(e.target.value)}
+                        placeholder="adminpass"
+                        required
+                      />
+                    </div>
+                  </div>
+                </>
+              )}
 
               {type === 'PAPER' && (
                 <div className="form-group">
@@ -863,16 +980,18 @@ export default function DashboardClient({ user }: { user: User }) {
                 </div>
               )}
 
-              <div className="form-group">
-                <label className="form-label">Owner Ingame Name (automatischer OP)</label>
-                <input
-                  type="text"
-                  className="form-input"
-                  value={opPlayer}
-                  onChange={(e) => setOpPlayer(e.target.value)}
-                  placeholder="z.B. Notch (optional)"
-                />
-              </div>
+              {type !== 'ARK' && (
+                <div className="form-group">
+                  <label className="form-label">Owner Ingame Name (automatischer OP)</label>
+                  <input
+                    type="text"
+                    className="form-input"
+                    value={opPlayer}
+                    onChange={(e) => setOpPlayer(e.target.value)}
+                    placeholder="z.B. Notch (optional)"
+                  />
+                </div>
+              )}
 
               <div style={{ display: 'flex', gap: '12px', justifyContent: 'flex-end', marginTop: '24px' }}>
                 <button type="button" className="btn btn-secondary" onClick={() => setModalOpen(false)}>

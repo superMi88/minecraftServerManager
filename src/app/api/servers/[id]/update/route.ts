@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { prisma } from '@/lib/db';
 import { isServerRunning, getServerFolderPath } from '@/lib/server-manager';
+import { findServer, getHandler } from '@/lib/servers/registry';
 import fs from 'fs';
 import path from 'path';
 import unzipper from 'unzipper';
@@ -34,29 +35,66 @@ function getLevelName(serverFolder: string): string {
 export async function POST(request: NextRequest, { params }: { params: Params }) {
   try {
     const { id } = await params;
-    const body = await request.json();
+    const body = await request.json().catch(() => ({}));
     const { targetJar, targetZip } = body;
 
     // Check server existence & determine type
-    let server: import('@prisma/client').MinecraftServer | import('@prisma/client').CurseForgeServer | null =
-      await prisma.minecraftServer.findUnique({ where: { id } });
-    const isPaper = !!server;
-    if (!server) {
-      server = await prisma.curseForgeServer.findUnique({ where: { id } });
-    }
-    if (!server) {
+    const result = await findServer(id);
+    if (!result) {
       return NextResponse.json({ success: false, error: 'Server nicht gefunden.' }, { status: 404 });
     }
+
+    const { server, type: serverType } = result;
+    const isPaper = serverType === 'PAPER';
 
     // Check if server is running
     if (isServerRunning(id)) {
       return NextResponse.json({
         success: false,
-        error: 'Der Server läuft noch. Bitte stoppe den Server, um das Update durchzuführen.',
+        error: 'Der Server läuft noch. Bitte stoppe den Server, um die Installation/das Update durchzuführen.',
       }, { status: 400 });
     }
 
     const serverFolder = getServerFolderPath(id);
+
+    // ARK specific background installation / update using SteamCMD
+    if (serverType === 'ARK') {
+      const handler = getHandler('ARK');
+      const logFile = path.join(serverFolder, 'console.txt');
+      
+      if (!fs.existsSync(serverFolder)) {
+        fs.mkdirSync(serverFolder, { recursive: true });
+      }
+
+      fs.writeFileSync(logFile, '[System] Starte SteamCMD Installation / Update für Ark: Survival Ascended...\n');
+      
+      const logCallback = (data: string) => {
+        try {
+          fs.appendFileSync(logFile, data);
+        } catch {}
+      };
+
+      // Run installation asynchronously in background
+      handler.install!(serverFolder, logCallback).then(async (installResult) => {
+        if (installResult.success) {
+          await prisma.arkServer.update({
+            where: { id },
+            data: { installed: true },
+          });
+        }
+      }).catch((err) => {
+        console.error('Ark Installation failed:', err);
+        try {
+          fs.appendFileSync(logFile, `\n[ERROR] Installation fehlgeschlagen: ${err.message || err}\n`);
+        } catch {}
+      });
+
+      return NextResponse.json({
+        success: true,
+        message: 'Installation/Update über SteamCMD im Hintergrund gestartet. Du kannst den Fortschritt in der Serverkonsole mitverfolgen.',
+      });
+    }
+
     const oldServerFolder = serverFolder + '_old';
     const newServerFolder = serverFolder + '_new';
 

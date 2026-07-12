@@ -107,6 +107,15 @@ export default function ServerConsoleClient({
   const [settingsLoading, setSettingsLoading] = useState(false);
   const [settingsError, setSettingsError] = useState<string | null>(null);
   const [settingsSuccess, setSettingsSuccess] = useState<string | null>(null);
+
+  // Ark specific settings states
+  const [queryPort, setQueryPort] = useState('27015');
+  const [rconPort, setRconPort] = useState('27020');
+  const [maxPlayers, setMaxPlayers] = useState('20');
+  const [map, setMap] = useState('TheIsland_WP');
+  const [serverPassword, setServerPassword] = useState('');
+  const [adminPassword, setAdminPassword] = useState('adminpass');
+  const [installed, setInstalled] = useState(false);
   
   const [zips, setZips] = useState<{ name: string; size: number; createdAt: string }[]>([]);
   const [jars, setJars] = useState<{ name: string; size: number; createdAt: string }[]>([]);
@@ -151,8 +160,8 @@ export default function ServerConsoleClient({
       if (res.ok && data.success) {
         setName(data.server.name);
         setPort(data.server.port.toString());
-        setMemoryMin(data.server.memoryMin);
-        setMemoryMax(data.server.memoryMax);
+        setMemoryMin(data.server.memoryMin || '');
+        setMemoryMax(data.server.memoryMax || '');
         setJarFile(data.server.jarFile || 'server.jar');
         setCurseForgeZip(data.server.curseForgeZip || '');
         setStartScript(data.server.startScript || 'run.sh');
@@ -163,6 +172,17 @@ export default function ServerConsoleClient({
         setOpPlayer(data.server.opPlayer || '');
         setIsRunning(data.server.isRunning);
         setRollbackAvailable(data.server.rollbackAvailable || false);
+        
+        // Ark settings loading
+        if (data.server.type === 'ARK') {
+          setQueryPort(data.server.queryPort?.toString() || '27015');
+          setRconPort(data.server.rconPort?.toString() || '27020');
+          setMaxPlayers(data.server.maxPlayers?.toString() || '20');
+          setMap(data.server.map || 'TheIsland_WP');
+          setServerPassword(data.server.serverPassword || '');
+          setAdminPassword(data.server.adminPassword || 'adminpass');
+          setInstalled(data.server.installed || false);
+        }
       }
     } catch (err) {
       console.error('Failed to load server metadata', err);
@@ -564,12 +584,18 @@ export default function ServerConsoleClient({
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
           port,
-          memoryMin,
-          memoryMax,
+          memoryMin: serverType !== 'ARK' ? memoryMin : undefined,
+          memoryMax: serverType !== 'ARK' ? memoryMax : undefined,
           jarFile: serverType === 'PAPER' ? jarFile : undefined,
           curseForgeZip: serverType === 'CURSEFORGE' ? curseForgeZip : undefined,
           startScript: serverType === 'CURSEFORGE' ? startScript : undefined,
-          opPlayer: opPlayer || undefined,
+          opPlayer: serverType !== 'ARK' ? opPlayer || undefined : undefined,
+          queryPort: serverType === 'ARK' ? queryPort : undefined,
+          rconPort: serverType === 'ARK' ? rconPort : undefined,
+          maxPlayers: serverType === 'ARK' ? maxPlayers : undefined,
+          map: serverType === 'ARK' ? map : undefined,
+          serverPassword: serverType === 'ARK' ? serverPassword : undefined,
+          adminPassword: serverType === 'ARK' ? adminPassword : undefined,
         }),
       });
       const data = await res.json();
@@ -746,7 +772,7 @@ export default function ServerConsoleClient({
           <div>
             <h1 style={{ fontSize: '1.75rem', fontWeight: 800, color: '#fff', marginBottom: '4px' }}>{name}</h1>
             <p style={{ color: 'var(--text-muted)' }}>
-              Servertyp: {serverType === 'PAPER' ? 'Paper (Plugins)' : 'CurseForge Modpack'} | Port: {port}
+              Servertyp: {serverType === 'PAPER' ? 'Paper (Plugins)' : serverType === 'CURSEFORGE' ? 'CurseForge Modpack' : 'Ark: Survival Ascended'} | Port: {port}
             </p>
           </div>
           
@@ -757,13 +783,14 @@ export default function ServerConsoleClient({
             <button
               onClick={() => handleControlAction(isRunning ? 'STOP' : 'START')}
               className={`btn ${isRunning ? 'btn-danger' : 'btn-success'}`}
+              disabled={serverType === 'ARK' && !installed}
             >
               {isRunning ? 'Stoppen' : 'Starten'}
             </button>
             <button
               onClick={() => handleControlAction('RESTART')}
               className="btn btn-warning"
-              disabled={!isRunning}
+              disabled={!isRunning || (serverType === 'ARK' && !installed)}
             >
               Neustart
             </button>
@@ -776,17 +803,21 @@ export default function ServerConsoleClient({
             Konsole
           </div>
           <div className={`tab ${activeTab === 'properties' ? 'active' : ''}`} onClick={() => setActiveTab('properties')}>
-            server.properties
+            {serverType === 'ARK' ? 'GameUserSettings.ini' : 'server.properties'}
           </div>
-          <div className={`tab ${activeTab === 'plugins' ? 'active' : ''}`} onClick={() => { setActiveTab('plugins'); fetchUploads(); }}>
-            Plugins
-          </div>
-          <div className={`tab ${activeTab === 'files' ? 'active' : ''}`} onClick={() => setActiveTab('files')}>
-            Dateien / Uploads
-          </div>
-          <div className={`tab ${activeTab === 'backups' ? 'active' : ''}`} onClick={() => setActiveTab('backups')}>
-            Backups
-          </div>
+          {serverType !== 'ARK' && (
+            <>
+              <div className={`tab ${activeTab === 'plugins' ? 'active' : ''}`} onClick={() => { setActiveTab('plugins'); fetchUploads(); }}>
+                Plugins
+              </div>
+              <div className={`tab ${activeTab === 'files' ? 'active' : ''}`} onClick={() => setActiveTab('files')}>
+                Dateien / Uploads
+              </div>
+              <div className={`tab ${activeTab === 'backups' ? 'active' : ''}`} onClick={() => setActiveTab('backups')}>
+                Backups
+              </div>
+            </>
+          )}
           <div
             className={`tab ${activeTab === 'settings' ? 'active' : ''}`}
             onClick={() => {
@@ -803,13 +834,29 @@ export default function ServerConsoleClient({
               fetchUploads();
             }}
           >
-            Server updaten
+            {serverType === 'ARK' ? 'Installation / Update' : 'Server updaten'}
           </div>
         </div>
 
         {/* Tab Content 1: Console */}
         {activeTab === 'console' && (
           <div>
+            {!installed && serverType === 'ARK' && (
+              <div className="card" style={{ borderLeft: '4px solid var(--warning)', backgroundColor: 'rgba(235, 94, 40, 0.1)', padding: '20px', marginBottom: '16px' }}>
+                <h4 style={{ color: 'var(--warning)', marginBottom: '8px', fontWeight: 700 }}>Ark-Server nicht installiert</h4>
+                <p style={{ fontSize: '0.9rem', marginBottom: '16px', color: 'var(--text-muted)' }}>
+                  Der Ark-Server ist derzeit noch nicht auf dem System installiert. Bitte klicke auf den Button unten, um den Download und die Einrichtung über SteamCMD im Hintergrund zu starten.
+                </p>
+                <button
+                  onClick={() => {
+                    setActiveTab('update');
+                  }}
+                  className="btn btn-warning"
+                >
+                  Zur Installation / Update gehen
+                </button>
+              </div>
+            )}
             <div className="console-box" ref={consoleRef}>
               {logs}
             </div>
@@ -819,11 +866,11 @@ export default function ServerConsoleClient({
                 className="form-input"
                 value={command}
                 onChange={(e) => setCommand(e.target.value)}
-                placeholder="Gebe einen Server-Befehl ein (z.B. op Notch, say Hallo)..."
-                disabled={!isRunning}
+                placeholder={serverType === 'ARK' ? "Befehle über Konsole werden für Ark nicht unterstützt (nutze RCON)." : "Gebe einen Server-Befehl ein (z.B. op Notch, say Hallo)..."}
+                disabled={!isRunning || serverType === 'ARK'}
                 style={{ flex: 1 }}
               />
-              <button type="submit" className="btn btn-primary" disabled={!isRunning}>
+              <button type="submit" className="btn btn-primary" disabled={!isRunning || serverType === 'ARK'}>
                 Senden
               </button>
             </form>
@@ -1165,29 +1212,100 @@ export default function ServerConsoleClient({
                   />
                 </div>
 
-                <div className="grid-2">
-                  <div className="form-group">
-                    <label className="form-label">Minimaler RAM (Java -Xms)</label>
-                    <input
-                      type="text"
-                      className="form-input"
-                      value={memoryMin}
-                      onChange={(e) => setMemoryMin(e.target.value)}
-                      required
-                    />
-                  </div>
+                {serverType !== 'ARK' ? (
+                  <div className="grid-2">
+                    <div className="form-group">
+                      <label className="form-label">Minimaler RAM (Java -Xms)</label>
+                      <input
+                        type="text"
+                        className="form-input"
+                        value={memoryMin}
+                        onChange={(e) => setMemoryMin(e.target.value)}
+                        required
+                      />
+                    </div>
 
-                  <div className="form-group">
-                    <label className="form-label">Maximaler RAM (Java -Xmx)</label>
-                    <input
-                      type="text"
-                      className="form-input"
-                      value={memoryMax}
-                      onChange={(e) => setMemoryMax(e.target.value)}
-                      required
-                    />
+                    <div className="form-group">
+                      <label className="form-label">Maximaler RAM (Java -Xmx)</label>
+                      <input
+                        type="text"
+                        className="form-input"
+                        value={memoryMax}
+                        onChange={(e) => setMemoryMax(e.target.value)}
+                        required
+                      />
+                    </div>
                   </div>
-                </div>
+                ) : (
+                  <>
+                    <div className="grid-2">
+                      <div className="form-group">
+                        <label className="form-label">Query Port (Steam-Browser)</label>
+                        <input
+                          type="number"
+                          className="form-input"
+                          value={queryPort}
+                          onChange={(e) => setQueryPort(e.target.value)}
+                          required
+                        />
+                      </div>
+                      <div className="form-group">
+                        <label className="form-label">RCON Port (Admin)</label>
+                        <input
+                          type="number"
+                          className="form-input"
+                          value={rconPort}
+                          onChange={(e) => setRconPort(e.target.value)}
+                          required
+                        />
+                      </div>
+                    </div>
+                    <div className="grid-2">
+                      <div className="form-group">
+                        <label className="form-label">Karte / Map</label>
+                        <input
+                          type="text"
+                          className="form-input"
+                          value={map}
+                          onChange={(e) => setMap(e.target.value)}
+                          required
+                        />
+                      </div>
+                      <div className="form-group">
+                        <label className="form-label">Max. Spieler</label>
+                        <input
+                          type="number"
+                          className="form-input"
+                          value={maxPlayers}
+                          onChange={(e) => setMaxPlayers(e.target.value)}
+                          required
+                        />
+                      </div>
+                    </div>
+                    <div className="grid-2">
+                      <div className="form-group">
+                        <label className="form-label">Server Passwort (Beitritt)</label>
+                        <input
+                          type="text"
+                          className="form-input"
+                          value={serverPassword}
+                          onChange={(e) => setServerPassword(e.target.value)}
+                          placeholder="Freilassen für kein Passwort"
+                        />
+                      </div>
+                      <div className="form-group">
+                        <label className="form-label">Admin Passwort</label>
+                        <input
+                          type="text"
+                          className="form-input"
+                          value={adminPassword}
+                          onChange={(e) => setAdminPassword(e.target.value)}
+                          required
+                        />
+                      </div>
+                    </div>
+                  </>
+                )}
 
                 {serverType === 'PAPER' && (
                   <div className="form-group">
@@ -1255,16 +1373,18 @@ export default function ServerConsoleClient({
                   </>
                 )}
 
-                <div className="form-group">
-                  <label className="form-label">OP Ingame Name</label>
-                  <input
-                    type="text"
-                    className="form-input"
-                    value={opPlayer}
-                    onChange={(e) => setOpPlayer(e.target.value)}
-                    placeholder="Wird beim Serverstart automatisch geopt"
-                  />
-                </div>
+                {serverType !== 'ARK' && (
+                  <div className="form-group">
+                    <label className="form-label">OP Ingame Name</label>
+                    <input
+                      type="text"
+                      className="form-input"
+                      value={opPlayer}
+                      onChange={(e) => setOpPlayer(e.target.value)}
+                      placeholder="Wird beim Serverstart automatisch geopt"
+                    />
+                  </div>
+                )}
 
                 <div style={{ display: 'flex', justifyContent: 'flex-end', marginTop: '24px' }}>
                   <button type="submit" className="btn btn-success" disabled={settingsLoading}>
@@ -1423,17 +1543,17 @@ export default function ServerConsoleClient({
         {/* Tab Content: Update Server */}
         {activeTab === 'update' && (
           <div>
-            <div className="grid-2">
-              {/* Left Column: Perform Update */}
-              <form onSubmit={handleServerUpdate} className="card">
-                <h3 style={{ color: '#fff', marginBottom: '16px' }}>Server updaten</h3>
+            {serverType === 'ARK' ? (
+              <form onSubmit={handleServerUpdate} className="card" style={{ maxWidth: '600px', margin: '0 auto' }}>
+                <h3 style={{ color: '#fff', marginBottom: '16px' }}>Ark Server Installation / Update</h3>
                 <p style={{ color: 'var(--text-muted)', fontSize: '0.9rem', marginBottom: '24px' }}>
-                  Wechsle die Server-Version. Das System erstellt vollautomatisch ein Welt-Backup und verschiebt die aktuelle Version zur Sicherheit nach <code>_old</code>, bevor die neue Version installiert wird.
+                  Installiert oder aktualisiert die Serverdateien für Ark: Survival Ascended direkt über SteamCMD (App ID: 2430930).
+                  Dies lädt ca. 15-20+ GB an Spieledateien direkt von den Steam-Servern herunter.
                 </p>
 
                 {isRunning && (
                   <div style={{ color: 'var(--danger)', fontSize: '0.9rem', marginBottom: '20px', fontWeight: 600 }}>
-                    ⚠️ Stoppe den Server, um das Update durchzuführen.
+                    ⚠️ Stoppe den Server, um die Installation oder ein Update durchzuführen.
                   </div>
                 )}
 
@@ -1449,96 +1569,134 @@ export default function ServerConsoleClient({
                 )}
 
                 <div className="form-group">
-                  <label className="form-label">Aktuelle Version</label>
+                  <label className="form-label">Installationsstatus</label>
                   <div style={{ padding: '10px 14px', backgroundColor: 'rgba(255, 255, 255, 0.05)', borderRadius: 'var(--border-radius)', fontFamily: 'monospace' }}>
-                    {serverType === 'PAPER' ? (jarFile || 'server.jar') : (curseForgeZip || 'Kein ZIP geladen')}
+                    {installed ? 'Installiert (Bereit zum Starten)' : 'Nicht installiert (Installation erforderlich)'}
                   </div>
                 </div>
 
-                {serverType === 'PAPER' ? (
-                  <div className="form-group">
-                    <label className="form-label">Neue JAR-Datei auswählen</label>
-                    <select
-                      className="form-select"
-                      value={targetJar}
-                      onChange={(e) => setTargetJar(e.target.value)}
-                      disabled={isRunning || updateLoading}
-                      required
-                    >
-                      <option value="">-- Bitte JAR-Datei auswählen --</option>
-                      <option value="server.jar">server.jar (Standard)</option>
-                      {jars.map((jar) => (
-                        <option key={jar.name} value={jar.name}>
-                          {jar.name} ({(jar.size / (1024 * 1024)).toFixed(2)} MB)
-                        </option>
-                      ))}
-                    </select>
-                  </div>
-                ) : (
-                  <div className="form-group">
-                    <label className="form-label">Neues CurseForge Server Pack (.zip) auswählen</label>
-                    <select
-                      className="form-select"
-                      value={targetZip}
-                      onChange={(e) => setTargetZip(e.target.value)}
-                      disabled={isRunning || updateLoading}
-                      required
-                    >
-                      <option value="">-- Bitte ZIP-Datei auswählen --</option>
-                      {zips.map((zip) => (
-                        <option key={zip.name} value={zip.name}>
-                          {zip.name} ({(zip.size / (1024 * 1024)).toFixed(2)} MB)
-                        </option>
-                      ))}
-                    </select>
-                  </div>
-                )}
-
                 <button type="submit" className="btn btn-primary" style={{ width: '100%', marginTop: '16px' }} disabled={isRunning || updateLoading}>
-                  {updateLoading ? 'Update läuft (Backup & Kopieren)...' : 'Update starten'}
+                  {updateLoading ? 'SteamCMD läuft im Hintergrund...' : installed ? 'Server aktualisieren (SteamCMD)' : 'Server installieren (SteamCMD)'}
                 </button>
               </form>
+            ) : (
+              <div className="grid-2">
+                {/* Left Column: Perform Update */}
+                <form onSubmit={handleServerUpdate} className="card">
+                  <h3 style={{ color: '#fff', marginBottom: '16px' }}>Server updaten</h3>
+                  <p style={{ color: 'var(--text-muted)', fontSize: '0.9rem', marginBottom: '24px' }}>
+                    Wechsle die Server-Version. Das System erstellt vollautomatisch ein Welt-Backup und verschiebt die aktuelle Version zur Sicherheit nach <code>_old</code>, bevor die neue Version installiert wird.
+                  </p>
 
-              {/* Right Column: Rollback Option */}
-              <div className="card" style={{ display: 'flex', flexDirection: 'column', gap: '16px' }}>
-                <h3 style={{ color: '#fff' }}>Rollback (Zurückrollen)</h3>
-                <p style={{ color: 'var(--text-muted)', fontSize: '0.9rem' }}>
-                  Sollte es nach einem Update Probleme geben, kannst du hier die direkt davor gesicherte Version wiederherstellen. Dadurch wird der aktuelle neue Server gelöscht und der alte Stand exakt so wieder gestartet, wie er vor dem Update war.
-                </p>
-
-                {rollbackError && (
-                  <div className="card" style={{ borderLeft: '4px solid var(--danger)', color: 'var(--danger)', padding: '12px 16px', marginBottom: '16px' }}>
-                    {rollbackError}
-                  </div>
-                )}
-                {rollbackSuccess && (
-                  <div className="card" style={{ borderLeft: '4px solid var(--success)', color: 'var(--success)', padding: '12px 16px', marginBottom: '16px' }}>
-                    {rollbackSuccess}
-                  </div>
-                )}
-
-                {!rollbackAvailable ? (
-                  <div className="card" style={{ backgroundColor: 'rgba(255, 255, 255, 0.02)', textAlign: 'center', padding: '24px', color: 'var(--text-muted)' }}>
-                    Keine alte Server-Version für Rollback verfügbar.
-                  </div>
-                ) : (
-                  <div style={{ display: 'flex', flexDirection: 'column', gap: '16px' }}>
-                    <div style={{ color: 'var(--warning)', fontWeight: 600, fontSize: '0.9rem' }}>
-                      ⚠️ Eine gesicherte Version vor dem letzten Update wurde gefunden.
+                  {isRunning && (
+                    <div style={{ color: 'var(--danger)', fontSize: '0.9rem', marginBottom: '20px', fontWeight: 600 }}>
+                      ⚠️ Stoppe den Server, um das Update durchzuführen.
                     </div>
-                    <button
-                      type="button"
-                      onClick={handleServerRollback}
-                      className="btn btn-warning"
-                      style={{ width: '100%' }}
-                      disabled={isRunning || rollbackLoading}
-                    >
-                      {rollbackLoading ? 'Führe Rollback aus...' : 'Rollback auf alte Version durchführen'}
-                    </button>
+                  )}
+
+                  {updateError && (
+                    <div className="card" style={{ borderLeft: '4px solid var(--danger)', color: 'var(--danger)', padding: '12px 16px', marginBottom: '16px' }}>
+                      {updateError}
+                    </div>
+                  )}
+                  {updateSuccess && (
+                    <div className="card" style={{ borderLeft: '4px solid var(--success)', color: 'var(--success)', padding: '12px 16px', marginBottom: '16px' }}>
+                      {updateSuccess}
+                    </div>
+                  )}
+
+                  <div className="form-group">
+                    <label className="form-label">Aktuelle Version</label>
+                    <div style={{ padding: '10px 14px', backgroundColor: 'rgba(255, 255, 255, 0.05)', borderRadius: 'var(--border-radius)', fontFamily: 'monospace' }}>
+                      {serverType === 'PAPER' ? (jarFile || 'server.jar') : (curseForgeZip || 'Kein ZIP geladen')}
+                    </div>
                   </div>
-                )}
+
+                  {serverType === 'PAPER' ? (
+                    <div className="form-group">
+                      <label className="form-label">Neue JAR-Datei auswählen</label>
+                      <select
+                        className="form-select"
+                        value={targetJar}
+                        onChange={(e) => setTargetJar(e.target.value)}
+                        disabled={isRunning || updateLoading}
+                        required
+                      >
+                        <option value="">-- Bitte JAR-Datei auswählen --</option>
+                        <option value="server.jar">server.jar (Standard)</option>
+                        {jars.map((jar) => (
+                          <option key={jar.name} value={jar.name}>
+                            {jar.name} ({(jar.size / (1024 * 1024)).toFixed(2)} MB)
+                          </option>
+                        ))}
+                      </select>
+                    </div>
+                  ) : (
+                    <div className="form-group">
+                      <label className="form-label">Neues CurseForge Server Pack (.zip) auswählen</label>
+                      <select
+                        className="form-select"
+                        value={targetZip}
+                        onChange={(e) => setTargetZip(e.target.value)}
+                        disabled={isRunning || updateLoading}
+                        required
+                      >
+                        <option value="">-- Bitte ZIP-Datei auswählen --</option>
+                        {zips.map((zip) => (
+                          <option key={zip.name} value={zip.name}>
+                            {zip.name} ({(zip.size / (1024 * 1024)).toFixed(2)} MB)
+                          </option>
+                        ))}
+                      </select>
+                    </div>
+                  )}
+
+                  <button type="submit" className="btn btn-primary" style={{ width: '100%', marginTop: '16px' }} disabled={isRunning || updateLoading}>
+                    {updateLoading ? 'Update läuft (Backup & Kopieren)...' : 'Update starten'}
+                  </button>
+                </form>
+
+                {/* Right Column: Rollback Option */}
+                <div className="card" style={{ display: 'flex', flexDirection: 'column', gap: '16px' }}>
+                  <h3 style={{ color: '#fff' }}>Rollback (Zurückrollen)</h3>
+                  <p style={{ color: 'var(--text-muted)', fontSize: '0.9rem' }}>
+                    Sollte es nach einem Update Probleme geben, kannst du hier die direkt davor gesicherte Version wiederherstellen. Dadurch wird der aktuelle neue Server gelöscht und der alte Stand exakt so wieder gestartet, wie er vor dem Update war.
+                  </p>
+
+                  {rollbackError && (
+                    <div className="card" style={{ borderLeft: '4px solid var(--danger)', color: 'var(--danger)', padding: '12px 16px', marginBottom: '16px' }}>
+                      {rollbackError}
+                    </div>
+                  )}
+                  {rollbackSuccess && (
+                    <div className="card" style={{ borderLeft: '4px solid var(--success)', color: 'var(--success)', padding: '12px 16px', marginBottom: '16px' }}>
+                      {rollbackSuccess}
+                    </div>
+                  )}
+
+                  {!rollbackAvailable ? (
+                    <div className="card" style={{ backgroundColor: 'rgba(255, 255, 255, 0.02)', textAlign: 'center', padding: '24px', color: 'var(--text-muted)' }}>
+                      Keine alte Server-Version für Rollback verfügbar.
+                    </div>
+                  ) : (
+                    <div style={{ display: 'flex', flexDirection: 'column', gap: '16px' }}>
+                      <div style={{ color: 'var(--warning)', fontWeight: 600, fontSize: '0.9rem' }}>
+                        ⚠️ Eine gesicherte Version vor dem letzten Update wurde gefunden.
+                      </div>
+                      <button
+                        type="button"
+                        onClick={handleServerRollback}
+                        className="btn btn-warning"
+                        style={{ width: '100%' }}
+                        disabled={isRunning || rollbackLoading}
+                      >
+                        {rollbackLoading ? 'Führe Rollback aus...' : 'Rollback auf alte Version durchführen'}
+                      </button>
+                    </div>
+                  )}
+                </div>
               </div>
-            </div>
+            )}
           </div>
         )}
       </main>

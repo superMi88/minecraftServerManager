@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { prisma } from '@/lib/db';
 import { getServerFolderPath } from '@/lib/server-manager';
+import { findServer } from '@/lib/servers/registry';
 import path from 'path';
 import fs from 'fs';
 import unzipper from 'unzipper';
@@ -10,24 +11,15 @@ type Params = Promise<{ id: string }>;
 export async function POST(request: NextRequest, { params }: { params: Params }) {
   try {
     const { id } = await params;
-    let server: {
-      id: string;
-      jarFile?: string | null;
-      type?: string;
-    } | null = await prisma.minecraftServer.findUnique({
-      where: { id },
-    });
-    let serverType = 'PAPER';
+    const result = await findServer(id);
 
-    if (!server) {
-      server = await prisma.curseForgeServer.findUnique({
-        where: { id },
-      });
-      serverType = 'CURSEFORGE';
+    if (!result) {
+      return NextResponse.json({ success: false, error: 'Server nicht gefunden.' }, { status: 404 });
     }
 
-    if (!server) {
-      return NextResponse.json({ success: false, error: 'Server not found.' }, { status: 404 });
+    const { server, type: serverType } = result;
+    if (serverType === 'ARK') {
+      return NextResponse.json({ success: false, error: 'Uploads werden für Ark-Server nicht über dieses Portal unterstützt. Nutze SteamCMD für Installationen/Updates.' }, { status: 400 });
     }
 
     server.type = serverType;
@@ -238,7 +230,6 @@ export async function POST(request: NextRequest, { params }: { params: Params })
         const zipPath = path.join(serverFolder, filename);
         fs.writeFileSync(zipPath, buffer);
         
-        // Run extraction in background to prevent HTTP timeouts
         Promise.resolve().then(async () => {
           const logFile = path.join(serverFolder, 'console.txt');
           const appendLog = (msg: string) => {
