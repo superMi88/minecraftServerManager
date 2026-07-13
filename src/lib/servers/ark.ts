@@ -67,6 +67,8 @@ export class ArkHandler implements GameServerHandler {
       listenOptions,
       '-server',
       '-log',
+      '-NullRHI',
+      '-nosound',
       '-NoBattlEye',
     ];
 
@@ -91,14 +93,16 @@ export class ArkHandler implements GameServerHandler {
       args,
       options: {
         cwd: path.dirname(exePath),
-        env: process.env,
+        env: {
+          ...process.env,
+          ...(isWindows ? {} : { WINEDEBUG: '-all' }),
+        },
         shell: true,
       }
     };
   }
 
-  async stop(serverProcess: ChildProcess, _folderPath: string): Promise<{ success: boolean; message?: string }> {
-    void _folderPath;
+  async stop(serverProcess: ChildProcess, folderPath: string): Promise<{ success: boolean; message?: string }> {
     // Ark dedicated server doesn't respond to standard stdin command for stopping cleanly.
     // Usually it requires RCON "saveworld" followed by "quit", or a graceful process termination.
     // Since we don't have RCON fully configured, we will attempt to terminate/kill it gracefully.
@@ -108,9 +112,10 @@ export class ArkHandler implements GameServerHandler {
         if (isWindows) {
           spawn('taskkill', ['/PID', serverProcess.pid.toString(), '/T', '/F']);
         } else {
-          // Gracefully kill on Linux, but also terminate any wine prefix processes if running via wine
-          spawn('pkill', ['-P', serverProcess.pid.toString()]);
+          // Gracefully kill the shell process
           serverProcess.kill('SIGTERM');
+          // Kill all Wine and game processes running in this server's specific directory path
+          spawn('pkill', ['-f', folderPath]);
         }
         return { success: true };
       }

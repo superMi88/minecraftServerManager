@@ -252,6 +252,9 @@ export async function stopServer(serverId: string) {
               process.kill(pid, 'SIGKILL');
             } catch {}
           });
+          if (processInstance.type === 'ARK') {
+            spawn('pkill', ['-9', '-f', folderPath]);
+          }
         }
       }
       runningServers.delete(serverId);
