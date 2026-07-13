@@ -43,13 +43,11 @@ export class ArkHandler implements GameServerHandler {
     }
 
     const isWindows = process.platform === 'win32';
-    const exePath = isWindows
-      ? path.join(folderPath, 'ShooterGame', 'Binaries', 'Win64', 'ArkAscendedServer.exe')
-      : path.join(folderPath, 'ShooterGame', 'Binaries', 'Linux', 'ArkAscendedServer');
+    const winExePath = path.join(folderPath, 'ShooterGame', 'Binaries', 'Win64', 'ArkAscendedServer.exe');
+    const linuxExePath = path.join(folderPath, 'ShooterGame', 'Binaries', 'Linux', 'ArkAscendedServer');
 
-    if (!fs.existsSync(exePath)) {
-      return { success: false, message: `Executable nicht gefunden unter ${exePath}. Bitte installiere den Server neu.` };
-    }
+    let exePath = isWindows ? winExePath : linuxExePath;
+    let command = exePath;
 
     // Command line args structure for Ark: Survival Ascended
     const map = cfg.map || 'TheIsland_WP';
@@ -65,16 +63,31 @@ export class ArkHandler implements GameServerHandler {
       listenOptions += `?ServerPassword=${serverPassword}`;
     }
 
-    const args = [
+    let args = [
       listenOptions,
       '-server',
       '-log',
       '-NoBattlEye',
     ];
 
+    if (!isWindows) {
+      if (fs.existsSync(linuxExePath)) {
+        exePath = linuxExePath;
+        command = linuxExePath;
+      } else if (fs.existsSync(winExePath)) {
+        exePath = winExePath;
+        command = 'wine';
+        args = [winExePath, ...args];
+      }
+    }
+
+    if (!fs.existsSync(exePath)) {
+      return { success: false, message: `Executable nicht gefunden unter ${exePath}. Bitte installiere den Server neu.` };
+    }
+
     return {
       success: true,
-      command: exePath,
+      command,
       args,
       options: {
         cwd: path.dirname(exePath),
@@ -95,6 +108,8 @@ export class ArkHandler implements GameServerHandler {
         if (isWindows) {
           spawn('taskkill', ['/PID', serverProcess.pid.toString(), '/T', '/F']);
         } else {
+          // Gracefully kill on Linux, but also terminate any wine prefix processes if running via wine
+          spawn('pkill', ['-P', serverProcess.pid.toString()]);
           serverProcess.kill('SIGTERM');
         }
         return { success: true };
@@ -214,12 +229,19 @@ export class ArkHandler implements GameServerHandler {
 
     return new Promise((resolve) => {
       // Run steamcmd to download / update ASA server (App ID 2430930)
-      const steamcmdProcess = spawn(steamcmdExe, [
+      // Force windows platform type on Linux hosts because there is no native Linux dedicated server binary.
+      const args: string[] = [];
+      if (!isWindows) {
+        args.push('+@sSteamCmdForcePlatformType', 'windows');
+      }
+      args.push(
         '+force_install_dir', folderPath,
         '+login', 'anonymous',
         '+app_update', '2430930', 'validate',
         '+quit'
-      ], {
+      );
+
+      const steamcmdProcess = spawn(steamcmdExe, args, {
         cwd: steamcmdDir,
         shell: true,
       });
