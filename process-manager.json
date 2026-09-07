@@ -1,36 +1,54 @@
 {
-  "name": "minecraftServerManager",
-  "requirements": [
+  "name": "Minecraft-Server-Manager",
+  "repository": "superMi88/minecraftServerManager",
+  "category": "Gaming Tools",
+  "services": [
     {
-      "key": "DATABASE_URL",
-      "type": "database",
-      "dbType": "postgres",
-      "description": "Prisma PostgreSQL Connection URL"
-    },
-    {
-      "key": "PORT",
-      "type": "credential",
-      "description": "Port the Next.js server listens on"
-    },
-    {
-      "key": "JWT_SECRET",
-      "type": "credential",
-      "description": "Secret key for signing JWT cookies (min 32 chars)"
-    },
-    {
-      "key": "LOGIN_USERNAME",
-      "type": "textinput",
-      "description": "Benutzername für den Admin-Login"
-    },
-    {
-      "key": "LOGIN_PASSWORD",
-      "type": "textinput",
-      "description": "Passwort für den Admin-Login"
-    },
-    {
-      "key": "MINECRAFT_SERVERS_DIR",
-      "type": "textinput",
-      "description": "Directory where Minecraft Server files will be stored (default: ./servers)"
+      "name": "Minecraft-Manager",
+      "pm2Process": "minecraft-manager",
+      "envPath": ".env",
+      "requirements": [
+        {
+          "key": "PORT",
+          "label": "Web Port",
+          "type": "port",
+          "defaultValue": "3000",
+          "description": "Port the Next.js server listens on"
+        },
+        {
+          "key": "DATABASE_URL",
+          "label": "PostgreSQL Datenbank",
+          "type": "database",
+          "dbType": "postgres",
+          "description": "Prisma PostgreSQL Connection URL"
+        },
+        {
+          "key": "JWT_SECRET",
+          "label": "JWT Secret",
+          "type": "secret",
+          "description": "Secret key for signing JWT cookies (min 32 chars)"
+        },
+        {
+          "key": "LOGIN_USERNAME",
+          "label": "Admin Benutzername",
+          "type": "credential",
+          "defaultValue": "admin",
+          "description": "Benutzername für den Admin-Login"
+        },
+        {
+          "key": "LOGIN_PASSWORD",
+          "label": "Admin Passwort",
+          "type": "secret",
+          "description": "Passwort für den Admin-Login"
+        },
+        {
+          "key": "MINECRAFT_SERVERS_DIR",
+          "label": "Minecraft Server Verzeichnis",
+          "type": "credential",
+          "defaultValue": "./servers",
+          "description": "Directory where Minecraft Server files will be stored (default: ./servers)"
+        }
+      ]
     }
   ]
 }
