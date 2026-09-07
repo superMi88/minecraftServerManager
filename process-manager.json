@@ -25,26 +25,26 @@
         {
           "key": "JWT_SECRET",
           "label": "JWT Secret",
-          "type": "secret",
+          "type": "textinput",
           "description": "Secret key for signing JWT cookies (min 32 chars)"
         },
         {
           "key": "LOGIN_USERNAME",
           "label": "Admin Benutzername",
-          "type": "credential",
+          "type": "textinput",
           "defaultValue": "admin",
           "description": "Benutzername für den Admin-Login"
         },
         {
           "key": "LOGIN_PASSWORD",
           "label": "Admin Passwort",
-          "type": "secret",
+          "type": "textinput",
           "description": "Passwort für den Admin-Login"
         },
         {
           "key": "MINECRAFT_SERVERS_DIR",
           "label": "Minecraft Server Verzeichnis",
-          "type": "credential",
+          "type": "textinput",
           "defaultValue": "./servers",
           "description": "Directory where Minecraft Server files will be stored (default: ./servers)"
         }
