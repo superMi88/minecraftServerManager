@@ -57,46 +57,6 @@ export async function POST(request: NextRequest, { params }: { params: Params })
 
     const serverFolder = getServerFolderPath(id);
 
-    // ARK specific background installation / update using SteamCMD
-    if (serverType === 'ARK') {
-      const handler = getHandler('ARK');
-      const logFile = path.join(serverFolder, 'console.txt');
-      
-      if (!fs.existsSync(serverFolder)) {
-        fs.mkdirSync(serverFolder, { recursive: true });
-      }
-
-      fs.writeFileSync(logFile, '[System] Starte SteamCMD Installation / Update für Ark: Survival Ascended...\n');
-      
-      const logCallback = (data: string) => {
-        try {
-          fs.appendFileSync(logFile, data);
-        } catch {}
-      };
-
-      // Run installation asynchronously in background
-      handler.install!(serverFolder, logCallback).then(async (installResult) => {
-        if (installResult.success) {
-          await prisma.arkServer.update({
-            where: { id },
-            data: { installed: true },
-          });
-        } else {
-          logCallback(`\n[ERROR] Installation fehlgeschlagen: ${installResult.message}\n`);
-        }
-      }).catch((err) => {
-        console.error('Ark Installation failed:', err);
-        try {
-          fs.appendFileSync(logFile, `\n[ERROR] Installation fehlgeschlagen: ${err.message || err}\n`);
-        } catch {}
-      });
-
-      return NextResponse.json({
-        success: true,
-        message: 'Installation/Update über SteamCMD im Hintergrund gestartet. Du kannst den Fortschritt in der Serverkonsole mitverfolgen.',
-      });
-    }
-
     const oldServerFolder = serverFolder + '_old';
     const newServerFolder = serverFolder + '_new';
 
@@ -146,7 +106,7 @@ export async function POST(request: NextRequest, { params }: { params: Params })
       if (!targetJar) {
         return NextResponse.json({ success: false, error: 'Bitte wähle eine JAR-Datei aus.' }, { status: 400 });
       }
-      const globalJarPath = path.join(process.cwd(), 'uploads', 'jars', targetJar);
+      const globalJarPath = path.join(process.cwd(), 'uploads', 'minecraft', 'jars', targetJar);
       if (!fs.existsSync(globalJarPath)) {
         return NextResponse.json({ success: false, error: `JAR-Datei "${targetJar}" wurde nicht in den Uploads gefunden.` }, { status: 404 });
       }
@@ -155,7 +115,7 @@ export async function POST(request: NextRequest, { params }: { params: Params })
       if (!targetZip) {
         return NextResponse.json({ success: false, error: 'Bitte wähle eine ZIP-Datei aus.' }, { status: 400 });
       }
-      const globalZipPath = path.join(process.cwd(), 'uploads', 'zips', targetZip);
+      const globalZipPath = path.join(process.cwd(), 'uploads', 'curseforge', targetZip);
       if (!fs.existsSync(globalZipPath)) {
         return NextResponse.json({ success: false, error: `ZIP-Datei "${targetZip}" wurde nicht in den Uploads gefunden.` }, { status: 404 });
       }

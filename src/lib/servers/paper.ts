@@ -21,10 +21,13 @@ export class PaperHandler implements GameServerHandler {
 
   async getStartCommand(folderPath: string, config: Record<string, unknown>): Promise<StartResult> {
     const cfg = config as unknown as PaperConfig;
-    const jarFile = cfg.jarFile || 'server.jar';
+    const jarFile = cfg.jarFile;
+    if (!jarFile) {
+      return { success: false, message: 'Keine Server-JAR-Datei für diesen Server konfiguriert.' };
+    }
     const jarPath = path.join(folderPath, jarFile);
     if (!fs.existsSync(jarPath)) {
-      return { success: false, message: `JAR file ${jarFile} not found in server folder.` };
+      return { success: false, message: `JAR-Datei "${jarFile}" wurde im Serverordner nicht gefunden.` };
     }
 
     return {

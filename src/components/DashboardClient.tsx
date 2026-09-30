@@ -13,16 +13,21 @@ interface User {
 interface Server {
   id: string;
   name: string;
-  type: 'PAPER' | 'CURSEFORGE' | 'ARK';
+  type: 'PAPER' | 'CURSEFORGE';
   port: number;
   memoryMin: string;
   memoryMax: string;
   jarFile: string | null;
-  opPlayer: string | null;
+  curseForgeZip?: string | null;
   isRunning: boolean;
   createdAt: string;
-  map?: string;
-  queryPort?: number;
+}
+
+interface UploadedFileItem {
+  name: string;
+  size: number;
+  createdAt: string;
+  description?: string;
 }
 
 const uploadInChunks = async (
@@ -30,6 +35,7 @@ const uploadInChunks = async (
   url: string,
   onProgress: (progress: number) => void,
   uploadType?: string,
+  description?: string,
   chunkSize: number = 2 * 1024 * 1024 // 2MB chunks
 ) => {
   const totalChunks = Math.ceil(file.size / chunkSize);
@@ -45,6 +51,9 @@ const uploadInChunks = async (
     formData.append('originalName', file.name);
     if (uploadType) {
       formData.append('uploadType', uploadType);
+    }
+    if (description && index + 1 === totalChunks) {
+      formData.append('description', description);
     }
 
     const res = await fetch(url, {
@@ -74,51 +83,51 @@ export default function DashboardClient({ user }: { user: User }) {
   // Modal state
   const [modalOpen, setModalOpen] = useState(false);
   const [name, setName] = useState('');
-  const [type, setType] = useState<'PAPER' | 'CURSEFORGE' | 'ARK'>('PAPER');
+  const [type, setType] = useState<'PAPER' | 'CURSEFORGE'>('PAPER');
   const [port, setPort] = useState('25565');
   const [memoryMin, setMemoryMin] = useState('2048M');
   const [memoryMax, setMemoryMax] = useState('6144M');
-  const [jarFile, setJarFile] = useState('server.jar');
+  const [jarFile, setJarFile] = useState('');
   const [curseForgeZip, setCurseForgeZip] = useState('');
-  const [opPlayer, setOpPlayer] = useState('');
-  
-  // Ark specific states
-  const [queryPort, setQueryPort] = useState('27015');
-  const [rconPort, setRconPort] = useState('27020');
-  const [maxPlayers, setMaxPlayers] = useState('20');
-  const [map, setMap] = useState('TheIsland_WP');
-  const [serverPassword, setServerPassword] = useState('');
-  const [adminPassword, setAdminPassword] = useState('adminpass');
 
   const [createLoading, setCreateLoading] = useState(false);
   const [createError, setCreateError] = useState<string | null>(null);
 
   // Uploads management state
-  const [zips, setZips] = useState<{ name: string; size: number; createdAt: string }[]>([]);
-  const [jars, setJars] = useState<{ name: string; size: number; createdAt: string }[]>([]);
-  const [plugins, setPlugins] = useState<{ name: string; size: number; createdAt: string }[]>([]);
+  const [zips, setZips] = useState<UploadedFileItem[]>([]);
+  const [jars, setJars] = useState<UploadedFileItem[]>([]);
+  const [plugins, setPlugins] = useState<UploadedFileItem[]>([]);
   const [activeDashboardTab, setActiveDashboardTab] = useState<'servers' | 'uploads'>('servers');
+  const [fileSubTab, setFileSubTab] = useState<'curseforge' | 'minecraft'>('curseforge');
 
+  // CurseForge upload state
   const [zipUploadFile, setZipUploadFile] = useState<File | null>(null);
+  const [zipDescription, setZipDescription] = useState('');
   const [zipUploadLoading, setZipUploadLoading] = useState(false);
   const [zipUploadError, setZipUploadError] = useState<string | null>(null);
   const [zipUploadSuccess, setZipUploadSuccess] = useState<string | null>(null);
   const [zipUploadProgress, setZipUploadProgress] = useState<number | null>(null);
-  const [isZipDragging, setIsZipDragging] = useState(false);
 
+  // Minecraft JAR upload state
   const [jarUploadFile, setJarUploadFile] = useState<File | null>(null);
+  const [jarDescription, setJarDescription] = useState('');
   const [jarUploadLoading, setJarUploadLoading] = useState(false);
   const [jarUploadError, setJarUploadError] = useState<string | null>(null);
   const [jarUploadSuccess, setJarUploadSuccess] = useState<string | null>(null);
   const [jarUploadProgress, setJarUploadProgress] = useState<number | null>(null);
-  const [isJarDragging, setIsJarDragging] = useState(false);
 
+  // Minecraft Plugin upload state (drag-and-drop enabled)
   const [pluginUploadFile, setPluginUploadFile] = useState<File | null>(null);
+  const [pluginDescription, setPluginDescription] = useState('');
   const [pluginUploadLoading, setPluginUploadLoading] = useState(false);
   const [pluginUploadError, setPluginUploadError] = useState<string | null>(null);
   const [pluginUploadSuccess, setPluginUploadSuccess] = useState<string | null>(null);
   const [pluginUploadProgress, setPluginUploadProgress] = useState<number | null>(null);
   const [isPluginDragging, setIsPluginDragging] = useState(false);
+
+  // Inline editing of descriptions
+  const [editingFileKey, setEditingFileKey] = useState<string | null>(null);
+  const [editingDescription, setEditingDescription] = useState('');
 
   // Fetch servers list
   const fetchServers = async () => {
@@ -143,9 +152,15 @@ export default function DashboardClient({ user }: { user: User }) {
       const res = await fetch('/api/uploads');
       const data = await res.json();
       if (res.ok && data.success) {
-        setZips(data.zips);
-        setJars(data.jars);
-        setPlugins(data.plugins || []);
+        setZips(data.curseforge || data.zips || []);
+        const loadedJars: UploadedFileItem[] = data.minecraft?.jars || data.jars || [];
+        setJars(loadedJars);
+        setPlugins(data.minecraft?.plugins || data.plugins || []);
+        
+        // Auto-select first jar if none selected
+        if (loadedJars.length > 0 && !jarFile) {
+          setJarFile(loadedJars[0].name);
+        }
       }
     } catch (err) {
       console.error('Failed to fetch uploads:', err);
@@ -158,21 +173,20 @@ export default function DashboardClient({ user }: { user: User }) {
       fetchUploads();
     });
     
-    // Poll servers status every 5 seconds to keep dashboard up to date
+    // Poll servers status every 5 seconds
     const interval = setInterval(fetchServers, 5000);
     return () => clearInterval(interval);
   }, []);
 
   // Handle server start/stop actions from dashboard
   const handleServerAction = async (serverId: string, isRunning: boolean, e: React.MouseEvent) => {
-    e.preventDefault(); // Prevent navigating to detail page when clicking button
+    e.preventDefault();
     const action = isRunning ? 'STOP' : 'START';
     
-    // Instantly update UI status to "Starting..." or "Stopping..." locally for immediate feedback
     setServers((prev) =>
       prev.map((s) =>
         s.id === serverId
-          ? { ...s, isRunning: !isRunning } // toggle
+          ? { ...s, isRunning: !isRunning }
           : s
       )
     );
@@ -185,12 +199,12 @@ export default function DashboardClient({ user }: { user: User }) {
       });
       const data = await res.json();
       if (!res.ok || !data.success) {
-        alert(`Action failed: ${data.error || 'Unknown error'}`);
-        fetchServers(); // Revert status
+        alert(`Aktion fehlgeschlagen: ${data.error || 'Unbekannter Fehler'}`);
+        fetchServers();
       }
     } catch (err) {
       console.error(err);
-      fetchServers(); // Revert status
+      fetchServers();
     }
   };
 
@@ -198,6 +212,16 @@ export default function DashboardClient({ user }: { user: User }) {
   const handleCreateServer = async (e: React.FormEvent) => {
     e.preventDefault();
     setCreateError(null);
+
+    if (type === 'PAPER' && !jarFile) {
+      setCreateError('Bitte wähle eine hochgeladene Server-JAR aus.');
+      return;
+    }
+    if (type === 'CURSEFORGE' && !curseForgeZip) {
+      setCreateError('Bitte wähle ein hochgeladenes CurseForge Modpack (.zip) aus.');
+      return;
+    }
+
     setCreateLoading(true);
 
     try {
@@ -208,44 +232,28 @@ export default function DashboardClient({ user }: { user: User }) {
           name,
           type,
           port,
-          memoryMin: type !== 'ARK' ? memoryMin : undefined,
-          memoryMax: type !== 'ARK' ? memoryMax : undefined,
+          memoryMin,
+          memoryMax,
           jarFile: type === 'PAPER' ? jarFile : undefined,
           curseForgeZip: type === 'CURSEFORGE' ? curseForgeZip : undefined,
-          opPlayer: type !== 'ARK' ? opPlayer || undefined : undefined,
-          queryPort: type === 'ARK' ? queryPort : undefined,
-          rconPort: type === 'ARK' ? rconPort : undefined,
-          maxPlayers: type === 'ARK' ? maxPlayers : undefined,
-          map: type === 'ARK' ? map : undefined,
-          serverPassword: type === 'ARK' ? serverPassword || undefined : undefined,
-          adminPassword: type === 'ARK' ? adminPassword : undefined,
         }),
       });
       const data = await res.json();
 
       if (res.ok && data.success) {
         setModalOpen(false);
-        // Clear fields
         setName('');
         setPort('25565');
         setMemoryMin('2048M');
         setMemoryMax('6144M');
-        setJarFile('server.jar');
         setCurseForgeZip('');
-        setOpPlayer('');
-        setQueryPort('27015');
-        setRconPort('27020');
-        setMaxPlayers('20');
-        setMap('TheIsland_WP');
-        setServerPassword('');
-        setAdminPassword('adminpass');
-        fetchServers(); // reload list
+        fetchServers();
       } else {
-        setCreateError(data.error || 'Failed to create server.');
+        setCreateError(data.error || 'Fehler beim Erstellen des Servers.');
       }
     } catch (err) {
       console.error(err);
-      setCreateError('A network error occurred.');
+      setCreateError('Netzwerkfehler aufgetreten.');
     } finally {
       setCreateLoading(false);
     }
@@ -259,9 +267,10 @@ export default function DashboardClient({ user }: { user: User }) {
     setZipUploadSuccess(null);
     setZipUploadProgress(0);
     try {
-      await uploadInChunks(zipUploadFile, '/api/uploads', setZipUploadProgress, 'zip');
-      setZipUploadSuccess(`Datei "${zipUploadFile.name}" erfolgreich hochgeladen.`);
+      await uploadInChunks(zipUploadFile, '/api/uploads', setZipUploadProgress, 'curseforge', zipDescription);
+      setZipUploadSuccess(`Modpack "${zipUploadFile.name}" erfolgreich in curseforge/ hochgeladen.`);
       setZipUploadFile(null);
+      setZipDescription('');
       fetchUploads();
     } catch (err) {
       console.error(err);
@@ -281,9 +290,10 @@ export default function DashboardClient({ user }: { user: User }) {
     setJarUploadSuccess(null);
     setJarUploadProgress(0);
     try {
-      await uploadInChunks(jarUploadFile, '/api/uploads', setJarUploadProgress, 'jar');
-      setJarUploadSuccess(`Datei "${jarUploadFile.name}" erfolgreich hochgeladen.`);
+      await uploadInChunks(jarUploadFile, '/api/uploads', setJarUploadProgress, 'jar', jarDescription);
+      setJarUploadSuccess(`JAR-Datei "${jarUploadFile.name}" erfolgreich in minecraft/jars/ hochgeladen.`);
       setJarUploadFile(null);
+      setJarDescription('');
       fetchUploads();
     } catch (err) {
       console.error(err);
@@ -303,9 +313,10 @@ export default function DashboardClient({ user }: { user: User }) {
     setPluginUploadSuccess(null);
     setPluginUploadProgress(0);
     try {
-      await uploadInChunks(pluginUploadFile, '/api/uploads', setPluginUploadProgress, 'plugin');
-      setPluginUploadSuccess(`Plugin "${pluginUploadFile.name}" erfolgreich hochgeladen.`);
+      await uploadInChunks(pluginUploadFile, '/api/uploads', setPluginUploadProgress, 'plugin', pluginDescription);
+      setPluginUploadSuccess(`Plugin "${pluginUploadFile.name}" erfolgreich in minecraft/plugins/ hochgeladen.`);
       setPluginUploadFile(null);
+      setPluginDescription('');
       fetchUploads();
     } catch (err) {
       console.error(err);
@@ -317,7 +328,7 @@ export default function DashboardClient({ user }: { user: User }) {
     }
   };
 
-  const handleDeleteFile = async (name: string, type: 'zip' | 'jar' | 'plugin') => {
+  const handleDeleteFile = async (name: string, type: 'curseforge' | 'jar' | 'plugin') => {
     if (!confirm(`Möchtest du die Datei "${name}" wirklich löschen?`)) return;
     try {
       const res = await fetch(`/api/uploads?name=${encodeURIComponent(name)}&type=${type}`, {
@@ -327,11 +338,31 @@ export default function DashboardClient({ user }: { user: User }) {
       if (res.ok && data.success) {
         fetchUploads();
       } else {
-        alert(data.error || 'Failed to delete file.');
+        alert(data.error || 'Löschen fehlgeschlagen.');
       }
     } catch (err) {
       console.error(err);
-      alert('Network error deleting file.');
+      alert('Netzwerkfehler beim Löschen.');
+    }
+  };
+
+  const handleSaveDescription = async (name: string, type: 'curseforge' | 'jar' | 'plugin') => {
+    try {
+      const res = await fetch('/api/uploads', {
+        method: 'PATCH',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ name, type, description: editingDescription }),
+      });
+      const data = await res.json();
+      if (res.ok && data.success) {
+        setEditingFileKey(null);
+        fetchUploads();
+      } else {
+        alert(data.error || 'Speichern der Beschreibung fehlgeschlagen.');
+      }
+    } catch (err) {
+      console.error(err);
+      alert('Netzwerkfehler beim Speichern.');
     }
   };
 
@@ -348,160 +379,188 @@ export default function DashboardClient({ user }: { user: User }) {
             style={{
               background: 'var(--primary)',
               color: 'white',
-              width: '32px',
-              height: '32px',
+              width: '36px',
+              height: '36px',
               borderRadius: '50%',
               display: 'flex',
               alignItems: 'center',
               justifyContent: 'center',
-              fontWeight: '700',
-              fontSize: '0.9rem',
-              boxShadow: 'var(--shadow-sm)',
+              fontWeight: 'bold',
             }}
           >
             {user.username.charAt(0).toUpperCase()}
           </div>
           <span style={{ fontWeight: 600 }}>{user.username}</span>
-          <a href="/api/auth/logout" className="btn btn-secondary" style={{ padding: '6px 12px', fontSize: '0.85rem' }}>
-            Logout
-          </a>
+          <form action="/api/auth/logout" method="POST" style={{ display: 'inline' }}>
+            <button type="submit" className="btn btn-secondary" style={{ padding: '6px 12px', fontSize: '0.85rem' }}>
+              Abmelden
+            </button>
+          </form>
         </div>
       </header>
 
-      {/* Main Content */}
-      <main className="main-content">
-        <div className="flex-between" style={{ marginBottom: '32px' }}>
+      {/* Main Container */}
+      <main className="container">
+        {/* Top actions & Tabs */}
+        <div className="flex-between" style={{ marginBottom: '24px' }}>
           <div>
-            <h1 style={{ fontSize: '1.75rem', fontWeight: 800, color: '#fff', marginBottom: '4px' }}>Dashboard</h1>
-            <p style={{ color: 'var(--text-muted)' }}>Verwalte deine Minecraft-Server und ZIP/JAR-Dateien.</p>
+            <h1 style={{ fontSize: '2rem', fontWeight: 800, color: '#fff', marginBottom: '8px' }}>Dashboard</h1>
+            <p style={{ color: 'var(--text-muted)' }}>
+              Verwalte deine Minecraft Paper- und CurseForge-Server sowie Uploads.
+            </p>
           </div>
           <button className="btn btn-primary" onClick={() => { fetchUploads(); setModalOpen(true); }}>
             <svg style={{ width: '18px', height: '18px' }} fill="none" stroke="currentColor" viewBox="0 0 24 24">
-              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2.5" d="M12 4v16m8-8H4" />
+              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M12 4v16m8-8H4" />
             </svg>
-            Server erstellen
+            Neuer Server
           </button>
         </div>
 
-        {/* Dashboard Tabs */}
-        <div className="tabs" style={{ marginBottom: '32px' }}>
+        {/* Global Navigation Tabs */}
+        <div className="tabs" style={{ marginBottom: '24px' }}>
           <div
             className={`tab ${activeDashboardTab === 'servers' ? 'active' : ''}`}
             onClick={() => setActiveDashboardTab('servers')}
           >
-            Server
+            Meine Server ({servers.length})
           </div>
           <div
             className={`tab ${activeDashboardTab === 'uploads' ? 'active' : ''}`}
-            onClick={() => { fetchUploads(); setActiveDashboardTab('uploads'); }}
+            onClick={() => {
+              fetchUploads();
+              setActiveDashboardTab('uploads');
+            }}
           >
             Dateiverwaltung (Uploads)
           </div>
         </div>
 
-        {error && (
-          <div className="card" style={{ borderLeft: '4px solid var(--danger)', color: 'var(--danger)' }}>
-            Error: {error}
-          </div>
-        )}
-
+        {/* Servers Tab */}
         {activeDashboardTab === 'servers' && (
           loading ? (
-            <div style={{ textAlign: 'center', padding: '48px 0', color: 'var(--text-muted)' }}>
-              <div
-                style={{
-                  border: '3px solid rgba(255, 255, 255, 0.1)',
-                  borderLeftColor: 'var(--primary)',
-                  borderRadius: '50%',
-                  width: '32px',
-                  height: '32px',
-                  animation: 'spin 1s linear infinite',
-                  margin: '0 auto 16px auto',
-                }}
-              />
+            <div style={{ textAlign: 'center', padding: '64px 0', color: 'var(--text-muted)' }}>
               Lade Server...
             </div>
+          ) : error ? (
+            <div className="card" style={{ borderLeft: '4px solid var(--danger)', color: 'var(--danger)' }}>
+              {error}
+            </div>
           ) : servers.length === 0 ? (
-            <div className="card" style={{ textAlign: 'center', padding: '48px 24px', color: 'var(--text-muted)' }}>
-              <svg style={{ width: '48px', height: '48px', margin: '0 auto 16px auto', opacity: 0.5 }} fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="1.5" d="M19 11H5m14 0a2 2 0 012 2v6a2 2 0 01-2 2H5a2 2 0 01-2-2v-6a2 2 0 012-2m14 0V9a2 2 0 00-2-2M5 11V9a2 2 0 012-2m0 0V5a2 2 0 012-2h6a2 2 0 012 2v2M7 7h10" />
-              </svg>
-              <h3>Keine Server konfiguriert</h3>
-              <p style={{ marginTop: '8px', fontSize: '0.9rem' }}>Erstelle deinen ersten Minecraft-Server mit dem Button oben rechts.</p>
+            <div className="card" style={{ textAlign: 'center', padding: '48px 24px' }}>
+              <h3 style={{ fontSize: '1.2rem', marginBottom: '8px', color: '#fff' }}>Keine Server vorhanden</h3>
+              <p style={{ color: 'var(--text-muted)', marginBottom: '24px' }}>
+                Erstelle deinen ersten Paper- oder CurseForge-Server, um loszulegen.
+              </p>
+              <button className="btn btn-primary" onClick={() => { fetchUploads(); setModalOpen(true); }}>
+                Server erstellen
+              </button>
             </div>
           ) : (
-            <div className="server-grid">
-            {servers.map((server) => (
-              <Link href={`/servers/${server.id}`} key={server.id} className="card server-card" style={{ textDecoration: 'none', color: 'inherit' }}>
-                <div className="server-card-header flex-between">
-                  <h3 style={{ color: '#fff', fontSize: '1.2rem', fontWeight: 700 }}>{server.name}</h3>
-                  <span className={`badge ${server.isRunning ? 'badge-success' : 'badge-danger'}`}>
-                    {server.isRunning ? 'Online' : 'Offline'}
-                  </span>
-                </div>
-                
-                <div className="server-card-meta">
-                  <span>Typ:</span>
-                  <span style={{ color: '#fff', fontWeight: 600 }}>
-                    {server.type === 'PAPER' ? 'Paper (Vanilla/Plugins)' : server.type === 'CURSEFORGE' ? 'CurseForge Modpack' : 'Ark: Survival Ascended'}
-                  </span>
-                  
-                  <span>Port:</span>
-                  <span style={{ color: '#fff', fontWeight: 600 }}>{server.port}</span>
-                  
-                  {server.type !== 'ARK' ? (
-                    <>
-                      <span>RAM:</span>
-                      <span style={{ color: '#fff', fontWeight: 600 }}>{server.memoryMin} - {server.memoryMax}</span>
-                    </>
-                  ) : (
-                    <>
-                      <span>Karte:</span>
-                      <span style={{ color: '#fff', fontWeight: 600 }}>{server.map || 'TheIsland_WP'}</span>
-                    </>
-                  )}
-                </div>
+            <div className="grid-3">
+              {servers.map((server) => (
+                <Link href={`/servers/${server.id}`} key={server.id} className="card-server">
+                  <div className="server-header">
+                    <div className="server-name-group">
+                      <h3>{server.name}</h3>
+                      <div className="server-badges">
+                        <span className={`status-dot ${server.isRunning ? 'online' : 'offline'}`} />
+                        <span style={{ fontSize: '0.85rem', color: server.isRunning ? 'var(--success)' : 'var(--danger)' }}>
+                          {server.isRunning ? 'Online' : 'Offline'}
+                        </span>
+                        <span className="badge badge-paper">
+                          {server.type === 'PAPER' ? 'Paper (Plugins)' : 'CurseForge'}
+                        </span>
+                      </div>
+                    </div>
+                  </div>
 
-                <div className="server-card-actions">
-                  <button
-                    onClick={(e) => handleServerAction(server.id, server.isRunning, e)}
-                    className={`btn ${server.isRunning ? 'btn-danger' : 'btn-success'}`}
-                    style={{ flex: 1, padding: '8px 16px', fontSize: '0.85rem' }}
-                  >
-                    {server.isRunning ? (
-                      <>
-                        <svg style={{ width: '14px', height: '14px' }} fill="currentColor" viewBox="0 0 24 24">
-                          <path d="M6 19h4V5H6v14zm8-14v14h4V5h-4z"/>
-                        </svg>
-                        Stoppen
-                      </>
-                    ) : (
-                      <>
-                        <svg style={{ width: '14px', height: '14px' }} fill="currentColor" viewBox="0 0 24 24">
-                          <path d="M8 5v14l11-7z"/>
-                        </svg>
-                        Starten
-                      </>
-                    )}
-                  </button>
-                  <button className="btn btn-secondary" style={{ padding: '8px 12px' }}>
-                    <svg style={{ width: '16px', height: '16px' }} fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M12 6V4m0 2a2 2 0 100 4m0-4a2 2 0 110 4m-6 8a2 2 0 100-4m0 4a2 2 0 110-4m0 4v2m0-6V4m6 6v10m6-2a2 2 0 100-4m0 4a2 2 0 110-4m0 4v2m0-6V4" />
-                    </svg>
-                  </button>
-                </div>
-              </Link>
-            ))}
-          </div>
-        ))}
+                  <div className="server-details">
+                    <div className="server-detail-item">
+                      <span className="server-detail-label">Port:</span>
+                      <span className="server-detail-val">{server.port}</span>
+                    </div>
+                    <div className="server-detail-item">
+                      <span className="server-detail-label">RAM:</span>
+                      <span className="server-detail-val">{server.memoryMin} - {server.memoryMax}</span>
+                    </div>
+                    <div className="server-detail-item">
+                      <span className="server-detail-label">{server.type === 'PAPER' ? 'JAR:' : 'Modpack:'}</span>
+                      <span className="server-detail-val" style={{ textOverflow: 'ellipsis', overflow: 'hidden', whiteSpace: 'nowrap', maxWidth: '150px' }}>
+                        {server.type === 'PAPER' ? (server.jarFile || 'Nicht konfiguriert') : (server.curseForgeZip || 'Kein ZIP')}
+                      </span>
+                    </div>
+                  </div>
 
+                  <div className="server-actions" onClick={(e) => e.stopPropagation()}>
+                    <button
+                      className={`btn ${server.isRunning ? 'btn-danger' : 'btn-success'}`}
+                      style={{ flex: 1, padding: '8px 12px' }}
+                      onClick={(e) => handleServerAction(server.id, server.isRunning, e)}
+                    >
+                      {server.isRunning ? (
+                        <>
+                          <svg style={{ width: '14px', height: '14px' }} fill="currentColor" viewBox="0 0 24 24">
+                            <path d="M6 19h4V5H6v14zm8-14v14h4V5h-4z"/>
+                          </svg>
+                          Stoppen
+                        </>
+                      ) : (
+                        <>
+                          <svg style={{ width: '14px', height: '14px' }} fill="currentColor" viewBox="0 0 24 24">
+                            <path d="M8 5v14l11-7z"/>
+                          </svg>
+                          Starten
+                        </>
+                      )}
+                    </button>
+                    <button className="btn btn-secondary" style={{ padding: '8px 12px' }}>
+                      <svg style={{ width: '16px', height: '16px' }} fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M12 6V4m0 2a2 2 0 100 4m0-4a2 2 0 110 4m-6 8a2 2 0 100-4m0 4a2 2 0 110-4m0 4v2m0-6V4m6 6v10m6-2a2 2 0 100-4m0 4a2 2 0 110-4m0 4v2m0-6V4" />
+                      </svg>
+                    </button>
+                  </div>
+                </Link>
+              ))}
+            </div>
+          )
+        )}
+
+        {/* Dateiverwaltung (Uploads) Tab */}
         {activeDashboardTab === 'uploads' && (
           <div>
-            <div className="grid-3">
-              {/* CurseForge ZIPs Panel */}
-              <div className="card">
-                <h3 style={{ color: '#fff', marginBottom: '16px' }}>CurseForge Server Packs (.zip)</h3>
-                
+            {/* Sub navigation between CurseForge and Minecraft */}
+            <div style={{ display: 'flex', gap: '12px', marginBottom: '24px' }}>
+              <button
+                type="button"
+                className={`btn ${fileSubTab === 'curseforge' ? 'btn-primary' : 'btn-secondary'}`}
+                style={{ borderRadius: '20px', padding: '8px 20px', fontSize: '0.95rem' }}
+                onClick={() => setFileSubTab('curseforge')}
+              >
+                CurseForge Server Packs ({zips.length})
+              </button>
+              <button
+                type="button"
+                className={`btn ${fileSubTab === 'minecraft' ? 'btn-primary' : 'btn-secondary'}`}
+                style={{ borderRadius: '20px', padding: '8px 20px', fontSize: '0.95rem' }}
+                onClick={() => setFileSubTab('minecraft')}
+              >
+                Minecraft Dateiverwaltung ({jars.length} JARs / {plugins.length} Plugins)
+              </button>
+            </div>
+
+            {/* CURSEFORGE TAB */}
+            {fileSubTab === 'curseforge' && (
+              <div className="card" style={{ maxWidth: '900px', margin: '0 auto' }}>
+                <div style={{ borderBottom: '1px solid var(--border-color)', paddingBottom: '16px', marginBottom: '20px' }}>
+                  <h3 style={{ color: '#fff', fontSize: '1.25rem', fontWeight: 700, marginBottom: '6px' }}>
+                    CurseForge Server Packs (.zip)
+                  </h3>
+                  <p style={{ color: 'var(--text-muted)', fontSize: '0.9rem' }}>
+                    Gespeichert in: <code style={{ color: 'var(--primary)', background: 'rgba(0,0,0,0.3)', padding: '2px 6px', borderRadius: '4px' }}>uploads/curseforge/</code>
+                  </p>
+                </div>
+
                 {zipUploadError && (
                   <div className="card" style={{ borderLeft: '4px solid var(--danger)', color: 'var(--danger)', padding: '12px 16px', marginBottom: '16px' }}>
                     {zipUploadError}
@@ -513,35 +572,29 @@ export default function DashboardClient({ user }: { user: User }) {
                   </div>
                 )}
 
-                <form onSubmit={handleZipUpload} style={{ display: 'flex', flexDirection: 'column', gap: '16px', marginBottom: '24px' }}>
-                  <div 
-                    className={`dropzone ${isZipDragging ? 'dragging' : ''}`}
-                    onClick={() => document.getElementById('zip-upload-input')?.click()}
-                    onDragOver={(e) => { e.preventDefault(); setIsZipDragging(true); }}
-                    onDragLeave={() => setIsZipDragging(false)}
-                    onDrop={(e) => {
-                      e.preventDefault();
-                      setIsZipDragging(false);
-                      if (e.dataTransfer.files && e.dataTransfer.files.length > 0) {
-                        setZipUploadFile(e.dataTransfer.files[0]);
-                      }
-                    }}
-                  >
-                    <svg style={{ width: '40px', height: '40px', margin: '0 auto', opacity: 0.5 }} fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="1.5" d="M7 16a4 4 0 01-.88-7.903A5 5 0 1115.9 6L16 6a5 5 0 011 9.9M15 13l-3-3m0 0l-3 3m3-3v12" />
-                    </svg>
-                    <div className="dropzone-text">
-                      {zipUploadFile ? zipUploadFile.name : 'Klicke hier oder ziehe ein ZIP hierher'}
-                    </div>
+                {/* Regular File Upload Form (No drag-and-drop zone) */}
+                <form onSubmit={handleZipUpload} style={{ display: 'flex', flexDirection: 'column', gap: '14px', marginBottom: '32px', background: 'var(--input-bg)', padding: '20px', borderRadius: 'var(--border-radius)' }}>
+                  <div>
+                    <label className="form-label" style={{ marginBottom: '8px' }}>ZIP-Datei auswählen</label>
+                    <input
+                      type="file"
+                      id="cf-zip-input"
+                      className="form-input"
+                      accept=".zip"
+                      onChange={(e) => setZipUploadFile(e.target.files?.[0] || null)}
+                    />
                   </div>
-                  
-                  <input
-                    type="file"
-                    id="zip-upload-input"
-                    onChange={(e) => setZipUploadFile(e.target.files?.[0] || null)}
-                    style={{ display: 'none' }}
-                    accept=".zip"
-                  />
+
+                  <div>
+                    <label className="form-label" style={{ marginBottom: '6px' }}>Beschreibung hinzufügen</label>
+                    <input
+                      type="text"
+                      className="form-input"
+                      placeholder="z.B. All The Mods 9 v1.0 Server Pack"
+                      value={zipDescription}
+                      onChange={(e) => setZipDescription(e.target.value)}
+                    />
+                  </div>
 
                   {zipUploadProgress !== null && (
                     <div style={{ width: '100%', display: 'flex', flexDirection: 'column', gap: '4px' }}>
@@ -555,30 +608,93 @@ export default function DashboardClient({ user }: { user: User }) {
                     </div>
                   )}
 
-                  <button type="submit" className="btn btn-primary" disabled={!zipUploadFile || zipUploadLoading}>
-                    {zipUploadLoading ? `Lade ZIP hoch... ${zipUploadProgress !== null ? `${zipUploadProgress}%` : ''}` : 'ZIP hochladen'}
+                  <button type="submit" className="btn btn-primary" disabled={!zipUploadFile || zipUploadLoading} style={{ alignSelf: 'flex-start' }}>
+                    {zipUploadLoading ? `Lade ZIP hoch... ${zipUploadProgress !== null ? `${zipUploadProgress}%` : ''}` : 'Server Pack hochladen'}
                   </button>
                 </form>
 
-                <h4 style={{ color: '#fff', marginBottom: '12px', fontSize: '1rem' }}>Hochgeladene ZIPs ({zips.length})</h4>
+                <h4 style={{ color: '#fff', marginBottom: '16px', fontSize: '1.1rem', fontWeight: 600 }}>
+                  Hochgeladene Server Packs ({zips.length})
+                </h4>
+
                 {zips.length === 0 ? (
-                  <p style={{ color: 'var(--text-muted)', fontSize: '0.9rem' }}>Keine Modpacks hochgeladen.</p>
+                  <div style={{ color: 'var(--text-muted)', textAlign: 'center', padding: '32px', border: '1px dashed var(--border-color)', borderRadius: 'var(--border-radius)' }}>
+                    Noch keine CurseForge Server Packs hochgeladen.
+                  </div>
                 ) : (
-                  <div style={{ display: 'flex', flexDirection: 'column', gap: '8px', maxHeight: '350px', overflowY: 'auto', paddingRight: '4px' }}>
-                    {zips.map((zip) => (
-                      <div key={zip.name} className="card" style={{ padding: '12px 16px', display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 0, backgroundColor: 'var(--input-bg)' }}>
-                        <div style={{ display: 'flex', flexDirection: 'column', gap: '4px', overflow: 'hidden' }}>
-                          <span style={{ fontWeight: 600, fontSize: '0.9rem', color: '#fff', textOverflow: 'ellipsis', overflow: 'hidden', whiteSpace: 'nowrap' }} title={zip.name}>
-                            {zip.name}
-                          </span>
+                  <div style={{ display: 'flex', flexDirection: 'column', gap: '12px' }}>
+                    {zips.map((item) => (
+                      <div
+                        key={item.name}
+                        className="card"
+                        style={{
+                          padding: '16px 20px',
+                          display: 'flex',
+                          justifyContent: 'space-between',
+                          alignItems: 'center',
+                          marginBottom: 0,
+                          backgroundColor: 'var(--input-bg)',
+                          border: '1px solid var(--border-color)',
+                        }}
+                      >
+                        <div style={{ display: 'flex', flexDirection: 'column', gap: '6px', flex: 1, marginRight: '16px' }}>
+                          <span style={{ fontWeight: 600, fontSize: '0.95rem', color: '#fff' }}>{item.name}</span>
+                          
+                          {/* Description & Inline edit */}
+                          {editingFileKey === `curseforge:${item.name}` ? (
+                            <div style={{ display: 'flex', gap: '8px', alignItems: 'center', marginTop: '4px' }}>
+                              <input
+                                type="text"
+                                className="form-input"
+                                style={{ padding: '4px 10px', fontSize: '0.85rem', flex: 1 }}
+                                value={editingDescription}
+                                onChange={(e) => setEditingDescription(e.target.value)}
+                                placeholder="Beschreibung eingeben..."
+                              />
+                              <button
+                                type="button"
+                                className="btn btn-success"
+                                style={{ padding: '4px 10px', fontSize: '0.8rem' }}
+                                onClick={() => handleSaveDescription(item.name, 'curseforge')}
+                              >
+                                Speichern
+                              </button>
+                              <button
+                                type="button"
+                                className="btn btn-secondary"
+                                style={{ padding: '4px 10px', fontSize: '0.8rem' }}
+                                onClick={() => setEditingFileKey(null)}
+                              >
+                                Abbrechen
+                              </button>
+                            </div>
+                          ) : (
+                            <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
+                              <span style={{ fontSize: '0.85rem', color: item.description ? '#ddd' : 'var(--text-muted)', fontStyle: item.description ? 'normal' : 'italic' }}>
+                                {item.description || 'Keine Beschreibung vorhanden'}
+                              </span>
+                              <button
+                                type="button"
+                                style={{ background: 'transparent', border: 'none', color: 'var(--primary)', cursor: 'pointer', fontSize: '0.8rem', padding: '2px 4px' }}
+                                onClick={() => {
+                                  setEditingFileKey(`curseforge:${item.name}`);
+                                  setEditingDescription(item.description || '');
+                                }}
+                              >
+                                ✏️ Bearbeiten
+                              </button>
+                            </div>
+                          )}
+
                           <span style={{ fontSize: '0.75rem', color: 'var(--text-muted)' }}>
-                            {(zip.size / (1024 * 1024)).toFixed(2)} MB | {new Date(zip.createdAt).toLocaleDateString()}
+                            {(item.size / (1024 * 1024)).toFixed(2)} MB • Hochgeladen: {new Date(item.createdAt).toLocaleDateString()}
                           </span>
                         </div>
+
                         <button
                           className="btn btn-danger"
-                          onClick={() => handleDeleteFile(zip.name, 'zip')}
-                          style={{ padding: '4px 8px', fontSize: '0.8rem', flexShrink: 0 }}
+                          onClick={() => handleDeleteFile(item.name, 'curseforge')}
+                          style={{ padding: '6px 12px', fontSize: '0.85rem', flexShrink: 0 }}
                         >
                           Löschen
                         </button>
@@ -587,187 +703,336 @@ export default function DashboardClient({ user }: { user: User }) {
                   </div>
                 )}
               </div>
+            )}
 
-              {/* Minecraft JARs Panel */}
-              <div className="card">
-                <h3 style={{ color: '#fff', marginBottom: '16px' }}>Minecraft Server JARs (.jar)</h3>
-                
-                {jarUploadError && (
-                  <div className="card" style={{ borderLeft: '4px solid var(--danger)', color: 'var(--danger)', padding: '12px 16px', marginBottom: '16px' }}>
-                    {jarUploadError}
+            {/* MINECRAFT TAB (JARS & PLUGINS) */}
+            {fileSubTab === 'minecraft' && (
+              <div className="grid-2">
+                {/* 1. Server JARs (No drag and drop) */}
+                <div className="card">
+                  <div style={{ borderBottom: '1px solid var(--border-color)', paddingBottom: '12px', marginBottom: '16px' }}>
+                    <h3 style={{ color: '#fff', fontSize: '1.2rem', fontWeight: 700, marginBottom: '4px' }}>
+                      Minecraft Server JARs (.jar)
+                    </h3>
+                    <p style={{ color: 'var(--text-muted)', fontSize: '0.85rem' }}>
+                      Gespeichert in: <code style={{ color: 'var(--primary)', background: 'rgba(0,0,0,0.3)', padding: '2px 6px', borderRadius: '4px' }}>uploads/minecraft/jars/</code>
+                    </p>
                   </div>
-                )}
-                {jarUploadSuccess && (
-                  <div className="card" style={{ borderLeft: '4px solid var(--success)', color: 'var(--success)', padding: '12px 16px', marginBottom: '16px' }}>
-                    {jarUploadSuccess}
-                  </div>
-                )}
 
-                <form onSubmit={handleJarUpload} style={{ display: 'flex', flexDirection: 'column', gap: '16px', marginBottom: '24px' }}>
-                  <div 
-                    className={`dropzone ${isJarDragging ? 'dragging' : ''}`}
-                    onClick={() => document.getElementById('jar-upload-input')?.click()}
-                    onDragOver={(e) => { e.preventDefault(); setIsJarDragging(true); }}
-                    onDragLeave={() => setIsJarDragging(false)}
-                    onDrop={(e) => {
-                      e.preventDefault();
-                      setIsJarDragging(false);
-                      if (e.dataTransfer.files && e.dataTransfer.files.length > 0) {
-                        setJarUploadFile(e.dataTransfer.files[0]);
-                      }
-                    }}
-                  >
-                    <svg style={{ width: '40px', height: '40px', margin: '0 auto', opacity: 0.5 }} fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="1.5" d="M7 16a4 4 0 01-.88-7.903A5 5 0 1115.9 6L16 6a5 5 0 011 9.9M15 13l-3-3m0 0l-3 3m3-3v12" />
-                    </svg>
-                    <div className="dropzone-text">
-                      {jarUploadFile ? jarUploadFile.name : 'Klicke hier oder ziehe eine JAR hierher'}
+                  {jarUploadError && (
+                    <div className="card" style={{ borderLeft: '4px solid var(--danger)', color: 'var(--danger)', padding: '12px 16px', marginBottom: '16px' }}>
+                      {jarUploadError}
                     </div>
-                  </div>
-                  
-                  <input
-                    type="file"
-                    id="jar-upload-input"
-                    onChange={(e) => setJarUploadFile(e.target.files?.[0] || null)}
-                    style={{ display: 'none' }}
-                    accept=".jar"
-                  />
-
-                  {jarUploadProgress !== null && (
-                    <div style={{ width: '100%', display: 'flex', flexDirection: 'column', gap: '4px' }}>
-                      <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: '0.8rem', color: 'var(--text-muted)' }}>
-                        <span>Lade hoch...</span>
-                        <span>{jarUploadProgress}%</span>
-                      </div>
-                      <div style={{ width: '100%', backgroundColor: 'rgba(255, 255, 255, 0.1)', borderRadius: '4px', height: '8px', overflow: 'hidden' }}>
-                        <div style={{ width: `${jarUploadProgress}%`, height: '100%', backgroundColor: 'var(--primary)', transition: 'width 0.1s ease-in-out' }} />
-                      </div>
+                  )}
+                  {jarUploadSuccess && (
+                    <div className="card" style={{ borderLeft: '4px solid var(--success)', color: 'var(--success)', padding: '12px 16px', marginBottom: '16px' }}>
+                      {jarUploadSuccess}
                     </div>
                   )}
 
-                  <button type="submit" className="btn btn-primary" disabled={!jarUploadFile || jarUploadLoading}>
-                    {jarUploadLoading ? `Lade JAR hoch... ${jarUploadProgress !== null ? `${jarUploadProgress}%` : ''}` : 'JAR hochladen'}
-                  </button>
-                </form>
-
-                <h4 style={{ color: '#fff', marginBottom: '12px', fontSize: '1rem' }}>Hochgeladene JARs ({jars.length})</h4>
-                {jars.length === 0 ? (
-                  <p style={{ color: 'var(--text-muted)', fontSize: '0.9rem' }}>Keine Server-JARs hochgeladen.</p>
-                ) : (
-                  <div style={{ display: 'flex', flexDirection: 'column', gap: '8px', maxHeight: '350px', overflowY: 'auto', paddingRight: '4px' }}>
-                    {jars.map((jar) => (
-                      <div key={jar.name} className="card" style={{ padding: '12px 16px', display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 0, backgroundColor: 'var(--input-bg)' }}>
-                        <div style={{ display: 'flex', flexDirection: 'column', gap: '4px', overflow: 'hidden' }}>
-                          <span style={{ fontWeight: 600, fontSize: '0.9rem', color: '#fff', textOverflow: 'ellipsis', overflow: 'hidden', whiteSpace: 'nowrap' }} title={jar.name}>
-                            {jar.name}
-                          </span>
-                          <span style={{ fontSize: '0.75rem', color: 'var(--text-muted)' }}>
-                            {(jar.size / (1024 * 1024)).toFixed(2)} MB | {new Date(jar.createdAt).toLocaleDateString()}
-                          </span>
-                        </div>
-                        <button
-                          className="btn btn-danger"
-                          onClick={() => handleDeleteFile(jar.name, 'jar')}
-                          style={{ padding: '4px 8px', fontSize: '0.8rem', flexShrink: 0 }}
-                        >
-                          Löschen
-                        </button>
-                      </div>
-                    ))}
-                  </div>
-                )}
-              </div>
-
-              {/* Minecraft Plugins Panel */}
-              <div className="card">
-                <h3 style={{ color: '#fff', marginBottom: '16px' }}>Minecraft Plugins (.jar)</h3>
-                
-                {pluginUploadError && (
-                  <div className="card" style={{ borderLeft: '4px solid var(--danger)', color: 'var(--danger)', padding: '12px 16px', marginBottom: '16px' }}>
-                    {pluginUploadError}
-                  </div>
-                )}
-                {pluginUploadSuccess && (
-                  <div className="card" style={{ borderLeft: '4px solid var(--success)', color: 'var(--success)', padding: '12px 16px', marginBottom: '16px' }}>
-                    {pluginUploadSuccess}
-                  </div>
-                )}
-
-                <form onSubmit={handlePluginUpload} style={{ display: 'flex', flexDirection: 'column', gap: '16px', marginBottom: '24px' }}>
-                  <div 
-                    className={`dropzone ${isPluginDragging ? 'dragging' : ''}`}
-                    onClick={() => document.getElementById('plugin-upload-input')?.click()}
-                    onDragOver={(e) => { e.preventDefault(); setIsPluginDragging(true); }}
-                    onDragLeave={() => setIsPluginDragging(false)}
-                    onDrop={(e) => {
-                      e.preventDefault();
-                      setIsPluginDragging(false);
-                      if (e.dataTransfer.files && e.dataTransfer.files.length > 0) {
-                        setPluginUploadFile(e.dataTransfer.files[0]);
-                      }
-                    }}
-                  >
-                    <svg style={{ width: '40px', height: '40px', margin: '0 auto', opacity: 0.5 }} fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="1.5" d="M7 16a4 4 0 01-.88-7.903A5 5 0 1115.9 6L16 6a5 5 0 011 9.9M15 13l-3-3m0 0l-3 3m3-3v12" />
-                    </svg>
-                    <div className="dropzone-text">
-                      {pluginUploadFile ? pluginUploadFile.name : 'Klicke hier oder ziehe ein Plugin hierher'}
+                  <form onSubmit={handleJarUpload} style={{ display: 'flex', flexDirection: 'column', gap: '12px', marginBottom: '24px', background: 'var(--input-bg)', padding: '16px', borderRadius: 'var(--border-radius)' }}>
+                    <div>
+                      <label className="form-label" style={{ marginBottom: '6px' }}>JAR-Datei auswählen</label>
+                      <input
+                        type="file"
+                        className="form-input"
+                        accept=".jar"
+                        onChange={(e) => setJarUploadFile(e.target.files?.[0] || null)}
+                      />
                     </div>
-                  </div>
-                  
-                  <input
-                    type="file"
-                    id="plugin-upload-input"
-                    onChange={(e) => setPluginUploadFile(e.target.files?.[0] || null)}
-                    style={{ display: 'none' }}
-                    accept=".jar"
-                  />
 
-                  {pluginUploadProgress !== null && (
-                    <div style={{ width: '100%', display: 'flex', flexDirection: 'column', gap: '4px' }}>
-                      <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: '0.8rem', color: 'var(--text-muted)' }}>
-                        <span>Lade hoch...</span>
-                        <span>{pluginUploadProgress}%</span>
+                    <div>
+                      <label className="form-label" style={{ marginBottom: '6px' }}>Beschreibung hinzufügen</label>
+                      <input
+                        type="text"
+                        className="form-input"
+                        placeholder="z.B. PaperMC 1.21.4 Build 120"
+                        value={jarDescription}
+                        onChange={(e) => setJarDescription(e.target.value)}
+                      />
+                    </div>
+
+                    {jarUploadProgress !== null && (
+                      <div style={{ width: '100%', display: 'flex', flexDirection: 'column', gap: '4px' }}>
+                        <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: '0.8rem', color: 'var(--text-muted)' }}>
+                          <span>Lade hoch...</span>
+                          <span>{jarUploadProgress}%</span>
+                        </div>
+                        <div style={{ width: '100%', backgroundColor: 'rgba(255, 255, 255, 0.1)', borderRadius: '4px', height: '8px', overflow: 'hidden' }}>
+                          <div style={{ width: `${jarUploadProgress}%`, height: '100%', backgroundColor: 'var(--primary)', transition: 'width 0.1s ease-in-out' }} />
+                        </div>
                       </div>
-                      <div style={{ width: '100%', backgroundColor: 'rgba(255, 255, 255, 0.1)', borderRadius: '4px', height: '8px', overflow: 'hidden' }}>
-                        <div style={{ width: `${pluginUploadProgress}%`, height: '100%', backgroundColor: 'var(--primary)', transition: 'width 0.1s ease-in-out' }} />
-                      </div>
+                    )}
+
+                    <button type="submit" className="btn btn-primary" disabled={!jarUploadFile || jarUploadLoading} style={{ alignSelf: 'flex-start' }}>
+                      {jarUploadLoading ? `Lade hoch... ${jarUploadProgress !== null ? `${jarUploadProgress}%` : ''}` : 'JAR hochladen'}
+                    </button>
+                  </form>
+
+                  <h4 style={{ color: '#fff', marginBottom: '12px', fontSize: '1rem', fontWeight: 600 }}>
+                    Hochgeladene Server-JARs ({jars.length})
+                  </h4>
+
+                  {jars.length === 0 ? (
+                    <div style={{ color: 'var(--text-muted)', textAlign: 'center', padding: '24px', border: '1px dashed var(--border-color)', borderRadius: 'var(--border-radius)', fontSize: '0.9rem' }}>
+                      Keine Server-JARs hochgeladen.
+                    </div>
+                  ) : (
+                    <div style={{ display: 'flex', flexDirection: 'column', gap: '10px', maxHeight: '450px', overflowY: 'auto' }}>
+                      {jars.map((item) => (
+                        <div
+                          key={item.name}
+                          className="card"
+                          style={{
+                            padding: '14px 16px',
+                            display: 'flex',
+                            justifyContent: 'space-between',
+                            alignItems: 'center',
+                            marginBottom: 0,
+                            backgroundColor: 'var(--input-bg)',
+                            border: '1px solid var(--border-color)',
+                          }}
+                        >
+                          <div style={{ display: 'flex', flexDirection: 'column', gap: '4px', flex: 1, marginRight: '12px' }}>
+                            <span style={{ fontWeight: 600, fontSize: '0.9rem', color: '#fff' }}>{item.name}</span>
+                            
+                            {editingFileKey === `jar:${item.name}` ? (
+                              <div style={{ display: 'flex', gap: '6px', alignItems: 'center' }}>
+                                <input
+                                  type="text"
+                                  className="form-input"
+                                  style={{ padding: '2px 8px', fontSize: '0.8rem', flex: 1 }}
+                                  value={editingDescription}
+                                  onChange={(e) => setEditingDescription(e.target.value)}
+                                />
+                                <button
+                                  type="button"
+                                  className="btn btn-success"
+                                  style={{ padding: '2px 6px', fontSize: '0.75rem' }}
+                                  onClick={() => handleSaveDescription(item.name, 'jar')}
+                                >
+                                  OK
+                                </button>
+                                <button
+                                  type="button"
+                                  className="btn btn-secondary"
+                                  style={{ padding: '2px 6px', fontSize: '0.75rem' }}
+                                  onClick={() => setEditingFileKey(null)}
+                                >
+                                  X
+                                </button>
+                              </div>
+                            ) : (
+                              <div style={{ display: 'flex', alignItems: 'center', gap: '6px' }}>
+                                <span style={{ fontSize: '0.8rem', color: item.description ? '#ccc' : 'var(--text-muted)' }}>
+                                  {item.description || 'Keine Beschreibung'}
+                                </span>
+                                <button
+                                  type="button"
+                                  style={{ background: 'transparent', border: 'none', color: 'var(--primary)', cursor: 'pointer', fontSize: '0.75rem' }}
+                                  onClick={() => {
+                                    setEditingFileKey(`jar:${item.name}`);
+                                    setEditingDescription(item.description || '');
+                                  }}
+                                >
+                                  ✏️
+                                </button>
+                              </div>
+                            )}
+
+                            <span style={{ fontSize: '0.75rem', color: 'var(--text-muted)' }}>
+                              {(item.size / (1024 * 1024)).toFixed(2)} MB • {new Date(item.createdAt).toLocaleDateString()}
+                            </span>
+                          </div>
+
+                          <button
+                            className="btn btn-danger"
+                            onClick={() => handleDeleteFile(item.name, 'jar')}
+                            style={{ padding: '4px 8px', fontSize: '0.8rem', flexShrink: 0 }}
+                          >
+                            Löschen
+                          </button>
+                        </div>
+                      ))}
+                    </div>
+                  )}
+                </div>
+
+                {/* 2. Minecraft Plugins (HAS THE DRAG AND DROP ZONE) */}
+                <div className="card">
+                  <div style={{ borderBottom: '1px solid var(--border-color)', paddingBottom: '12px', marginBottom: '16px' }}>
+                    <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
+                      <h3 style={{ color: '#fff', fontSize: '1.2rem', fontWeight: 700, marginBottom: '4px' }}>
+                        Minecraft Plugins (.jar)
+                      </h3>
+                      <span className="badge badge-paper" style={{ fontSize: '0.75rem' }}>Drag & Drop aktiv</span>
+                    </div>
+                    <p style={{ color: 'var(--text-muted)', fontSize: '0.85rem' }}>
+                      Gespeichert in: <code style={{ color: 'var(--primary)', background: 'rgba(0,0,0,0.3)', padding: '2px 6px', borderRadius: '4px' }}>uploads/minecraft/plugins/</code>
+                    </p>
+                  </div>
+
+                  {pluginUploadError && (
+                    <div className="card" style={{ borderLeft: '4px solid var(--danger)', color: 'var(--danger)', padding: '12px 16px', marginBottom: '16px' }}>
+                      {pluginUploadError}
+                    </div>
+                  )}
+                  {pluginUploadSuccess && (
+                    <div className="card" style={{ borderLeft: '4px solid var(--success)', color: 'var(--success)', padding: '12px 16px', marginBottom: '16px' }}>
+                      {pluginUploadSuccess}
                     </div>
                   )}
 
-                  <button type="submit" className="btn btn-primary" disabled={!pluginUploadFile || pluginUploadLoading}>
-                    {pluginUploadLoading ? `Lade Plugin hoch... ${pluginUploadProgress !== null ? `${pluginUploadProgress}%` : ''}` : 'Plugin hochladen'}
-                  </button>
-                </form>
-
-                <h4 style={{ color: '#fff', marginBottom: '12px', fontSize: '1rem' }}>Hochgeladene Plugins ({plugins.length})</h4>
-                {plugins.length === 0 ? (
-                  <p style={{ color: 'var(--text-muted)', fontSize: '0.9rem' }}>Keine Plugins hochgeladen.</p>
-                ) : (
-                  <div style={{ display: 'flex', flexDirection: 'column', gap: '8px', maxHeight: '350px', overflowY: 'auto', paddingRight: '4px' }}>
-                    {plugins.map((plugin) => (
-                      <div key={plugin.name} className="card" style={{ padding: '12px 16px', display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 0, backgroundColor: 'var(--input-bg)' }}>
-                        <div style={{ display: 'flex', flexDirection: 'column', gap: '4px', overflow: 'hidden' }}>
-                          <span style={{ fontWeight: 600, fontSize: '0.9rem', color: '#fff', textOverflow: 'ellipsis', overflow: 'hidden', whiteSpace: 'nowrap' }} title={plugin.name}>
-                            {plugin.name}
-                          </span>
-                          <span style={{ fontSize: '0.75rem', color: 'var(--text-muted)' }}>
-                            {(plugin.size / (1024 * 1024)).toFixed(2)} MB | {new Date(plugin.createdAt).toLocaleDateString()}
-                          </span>
-                        </div>
-                        <button
-                          className="btn btn-danger"
-                          onClick={() => handleDeleteFile(plugin.name, 'plugin')}
-                          style={{ padding: '4px 8px', fontSize: '0.8rem', flexShrink: 0 }}
-                        >
-                          Löschen
-                        </button>
+                  <form onSubmit={handlePluginUpload} style={{ display: 'flex', flexDirection: 'column', gap: '14px', marginBottom: '24px' }}>
+                    {/* Explicit Drag & Drop zone for plugins only */}
+                    <div 
+                      className={`dropzone ${isPluginDragging ? 'dragging' : ''}`}
+                      onClick={() => document.getElementById('plugin-upload-input')?.click()}
+                      onDragOver={(e) => { e.preventDefault(); setIsPluginDragging(true); }}
+                      onDragLeave={() => setIsPluginDragging(false)}
+                      onDrop={(e) => {
+                        e.preventDefault();
+                        setIsPluginDragging(false);
+                        if (e.dataTransfer.files && e.dataTransfer.files.length > 0) {
+                          setPluginUploadFile(e.dataTransfer.files[0]);
+                        }
+                      }}
+                      style={{ padding: '24px 16px' }}
+                    >
+                      <svg style={{ width: '36px', height: '36px', margin: '0 auto', opacity: 0.6 }} fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="1.5" d="M7 16a4 4 0 01-.88-7.903A5 5 0 1115.9 6L16 6a5 5 0 011 9.9M15 13l-3-3m0 0l-3 3m3-3v12" />
+                      </svg>
+                      <div className="dropzone-text" style={{ fontSize: '0.9rem' }}>
+                        {pluginUploadFile ? pluginUploadFile.name : 'Plugin (.jar) hierher ziehen oder klicken'}
                       </div>
-                    ))}
-                  </div>
-                )}
+                    </div>
+                    
+                    <input
+                      type="file"
+                      id="plugin-upload-input"
+                      onChange={(e) => setPluginUploadFile(e.target.files?.[0] || null)}
+                      style={{ display: 'none' }}
+                      accept=".jar"
+                    />
+
+                    <div>
+                      <label className="form-label" style={{ marginBottom: '6px' }}>Beschreibung hinzufügen</label>
+                      <input
+                        type="text"
+                        className="form-input"
+                        placeholder="z.B. EssentialsX 2.20.1 Grundsystem"
+                        value={pluginDescription}
+                        onChange={(e) => setPluginDescription(e.target.value)}
+                      />
+                    </div>
+
+                    {pluginUploadProgress !== null && (
+                      <div style={{ width: '100%', display: 'flex', flexDirection: 'column', gap: '4px' }}>
+                        <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: '0.8rem', color: 'var(--text-muted)' }}>
+                          <span>Lade hoch...</span>
+                          <span>{pluginUploadProgress}%</span>
+                        </div>
+                        <div style={{ width: '100%', backgroundColor: 'rgba(255, 255, 255, 0.1)', borderRadius: '4px', height: '8px', overflow: 'hidden' }}>
+                          <div style={{ width: `${pluginUploadProgress}%`, height: '100%', backgroundColor: 'var(--primary)', transition: 'width 0.1s ease-in-out' }} />
+                        </div>
+                      </div>
+                    )}
+
+                    <button type="submit" className="btn btn-primary" disabled={!pluginUploadFile || pluginUploadLoading} style={{ alignSelf: 'flex-start' }}>
+                      {pluginUploadLoading ? `Lade Plugin hoch... ${pluginUploadProgress !== null ? `${pluginUploadProgress}%` : ''}` : 'Plugin hochladen'}
+                    </button>
+                  </form>
+
+                  <h4 style={{ color: '#fff', marginBottom: '12px', fontSize: '1rem', fontWeight: 600 }}>
+                    Verfügbare Plugins ({plugins.length})
+                  </h4>
+
+                  {plugins.length === 0 ? (
+                    <div style={{ color: 'var(--text-muted)', textAlign: 'center', padding: '24px', border: '1px dashed var(--border-color)', borderRadius: 'var(--border-radius)', fontSize: '0.9rem' }}>
+                      Noch keine Plugins hochgeladen.
+                    </div>
+                  ) : (
+                    <div style={{ display: 'flex', flexDirection: 'column', gap: '10px', maxHeight: '450px', overflowY: 'auto' }}>
+                      {plugins.map((item) => (
+                        <div
+                          key={item.name}
+                          className="card"
+                          style={{
+                            padding: '14px 16px',
+                            display: 'flex',
+                            justifyContent: 'space-between',
+                            alignItems: 'center',
+                            marginBottom: 0,
+                            backgroundColor: 'var(--input-bg)',
+                            border: '1px solid var(--border-color)',
+                          }}
+                        >
+                          <div style={{ display: 'flex', flexDirection: 'column', gap: '4px', flex: 1, marginRight: '12px' }}>
+                            <span style={{ fontWeight: 600, fontSize: '0.9rem', color: '#fff' }}>{item.name}</span>
+                            
+                            {editingFileKey === `plugin:${item.name}` ? (
+                              <div style={{ display: 'flex', gap: '6px', alignItems: 'center' }}>
+                                <input
+                                  type="text"
+                                  className="form-input"
+                                  style={{ padding: '2px 8px', fontSize: '0.8rem', flex: 1 }}
+                                  value={editingDescription}
+                                  onChange={(e) => setEditingDescription(e.target.value)}
+                                />
+                                <button
+                                  type="button"
+                                  className="btn btn-success"
+                                  style={{ padding: '2px 6px', fontSize: '0.75rem' }}
+                                  onClick={() => handleSaveDescription(item.name, 'plugin')}
+                                >
+                                  OK
+                                </button>
+                                <button
+                                  type="button"
+                                  className="btn btn-secondary"
+                                  style={{ padding: '2px 6px', fontSize: '0.75rem' }}
+                                  onClick={() => setEditingFileKey(null)}
+                                >
+                                  X
+                                </button>
+                              </div>
+                            ) : (
+                              <div style={{ display: 'flex', alignItems: 'center', gap: '6px' }}>
+                                <span style={{ fontSize: '0.8rem', color: item.description ? '#ccc' : 'var(--text-muted)' }}>
+                                  {item.description || 'Keine Beschreibung'}
+                                </span>
+                                <button
+                                  type="button"
+                                  style={{ background: 'transparent', border: 'none', color: 'var(--primary)', cursor: 'pointer', fontSize: '0.75rem' }}
+                                  onClick={() => {
+                                    setEditingFileKey(`plugin:${item.name}`);
+                                    setEditingDescription(item.description || '');
+                                  }}
+                                >
+                                  ✏️
+                                </button>
+                              </div>
+                            )}
+
+                            <span style={{ fontSize: '0.75rem', color: 'var(--text-muted)' }}>
+                              {(item.size / (1024 * 1024)).toFixed(2)} MB • {new Date(item.createdAt).toLocaleDateString()}
+                            </span>
+                          </div>
+
+                          <button
+                            className="btn btn-danger"
+                            onClick={() => handleDeleteFile(item.name, 'plugin')}
+                            style={{ padding: '4px 8px', fontSize: '0.8rem', flexShrink: 0 }}
+                          >
+                            Löschen
+                          </button>
+                        </div>
+                      ))}
+                    </div>
+                  )}
+                </div>
               </div>
-            </div>
+            )}
           </div>
         )}
       </main>
@@ -775,7 +1040,7 @@ export default function DashboardClient({ user }: { user: User }) {
       {/* Create Server Modal */}
       {modalOpen && (
         <div className="modal-overlay">
-          <div className="modal-content">
+          <div className="modal-content" style={{ maxWidth: '580px' }}>
             <div className="modal-header">
               <h2 style={{ color: '#fff', fontSize: '1.4rem', fontWeight: 800 }}>Neuen Server anlegen</h2>
               <button className="modal-close" onClick={() => setModalOpen(false)}>×</button>
@@ -806,19 +1071,10 @@ export default function DashboardClient({ user }: { user: User }) {
                   <select
                     className="form-select"
                     value={type}
-                    onChange={(e) => {
-                      const newType = e.target.value as 'PAPER' | 'CURSEFORGE' | 'ARK';
-                      setType(newType);
-                      if (newType === 'ARK') {
-                        setPort('7777');
-                      } else {
-                        setPort('25565');
-                      }
-                    }}
+                    onChange={(e) => setType(e.target.value as 'PAPER' | 'CURSEFORGE')}
                   >
                     <option value="PAPER">Paper Minecraft (Standard/Plugins)</option>
                     <option value="CURSEFORGE">CurseForge Modpack Server</option>
-                    <option value="ARK">Ark: Survival Ascended Server</option>
                   </select>
                 </div>
 
@@ -829,167 +1085,85 @@ export default function DashboardClient({ user }: { user: User }) {
                     className="form-input"
                     value={port}
                     onChange={(e) => setPort(e.target.value)}
-                    placeholder={type === 'ARK' ? '7777' : '25565'}
+                    placeholder="25565"
                     required
                   />
                 </div>
               </div>
 
-              {type !== 'ARK' ? (
-                <div className="grid-2">
-                  <div className="form-group">
-                    <label className="form-label">Minimaler RAM (Java -Xms)</label>
-                    <input
-                      type="text"
-                      className="form-input"
-                      value={memoryMin}
-                      onChange={(e) => setMemoryMin(e.target.value)}
-                      placeholder="z.B. 2048M oder 2G"
-                      required
-                    />
-                  </div>
-
-                  <div className="form-group">
-                    <label className="form-label">Maximaler RAM (Java -Xmx)</label>
-                    <input
-                      type="text"
-                      className="form-input"
-                      value={memoryMax}
-                      onChange={(e) => setMemoryMax(e.target.value)}
-                      placeholder="z.B. 6144M oder 6G"
-                      required
-                    />
-                  </div>
+              <div className="grid-2">
+                <div className="form-group">
+                  <label className="form-label">Minimaler RAM (Java -Xms)</label>
+                  <input
+                    type="text"
+                    className="form-input"
+                    value={memoryMin}
+                    onChange={(e) => setMemoryMin(e.target.value)}
+                    placeholder="z.B. 2048M oder 2G"
+                    required
+                  />
                 </div>
-              ) : (
-                <>
-                  <div className="grid-2">
-                    <div className="form-group">
-                      <label className="form-label">Query Port (Steam-Browser)</label>
-                      <input
-                        type="number"
-                        className="form-input"
-                        value={queryPort}
-                        onChange={(e) => setQueryPort(e.target.value)}
-                        placeholder="27015"
-                        required
-                      />
-                    </div>
-                    <div className="form-group">
-                      <label className="form-label">RCON Port (Admin)</label>
-                      <input
-                        type="number"
-                        className="form-input"
-                        value={rconPort}
-                        onChange={(e) => setRconPort(e.target.value)}
-                        placeholder="27020"
-                        required
-                      />
-                    </div>
-                  </div>
-                  <div className="grid-2">
-                    <div className="form-group">
-                      <label className="form-label">Karte / Map</label>
-                      <input
-                        type="text"
-                        className="form-input"
-                        value={map}
-                        onChange={(e) => setMap(e.target.value)}
-                        placeholder="TheIsland_WP"
-                        required
-                      />
-                    </div>
-                    <div className="form-group">
-                      <label className="form-label">Max. Spieler</label>
-                      <input
-                        type="number"
-                        className="form-input"
-                        value={maxPlayers}
-                        onChange={(e) => setMaxPlayers(e.target.value)}
-                        placeholder="20"
-                        required
-                      />
-                    </div>
-                  </div>
-                  <div className="grid-2">
-                    <div className="form-group">
-                      <label className="form-label">Server Passwort (Beitritt)</label>
-                      <input
-                        type="text"
-                        className="form-input"
-                        value={serverPassword}
-                        onChange={(e) => setServerPassword(e.target.value)}
-                        placeholder="Freilassen für kein Passwort"
-                      />
-                    </div>
-                    <div className="form-group">
-                      <label className="form-label">Admin Passwort</label>
-                      <input
-                        type="text"
-                        className="form-input"
-                        value={adminPassword}
-                        onChange={(e) => setAdminPassword(e.target.value)}
-                        placeholder="adminpass"
-                        required
-                      />
-                    </div>
-                  </div>
-                </>
-              )}
+
+                <div className="form-group">
+                  <label className="form-label">Maximaler RAM (Java -Xmx)</label>
+                  <input
+                    type="text"
+                    className="form-input"
+                    value={memoryMax}
+                    onChange={(e) => setMemoryMax(e.target.value)}
+                    placeholder="z.B. 6144M oder 6G"
+                    required
+                  />
+                </div>
+              </div>
 
               {type === 'PAPER' && (
                 <div className="form-group">
-                  <label className="form-label">JAR-Datei auswählen</label>
-                  <select
-                    className="form-select"
-                    value={jarFile}
-                    onChange={(e) => setJarFile(e.target.value)}
-                    required
-                  >
-                    <option value="server.jar">server.jar (Standard)</option>
-                    {jars.map((jar) => (
-                      <option key={jar.name} value={jar.name}>
-                        {jar.name} ({(jar.size / (1024 * 1024)).toFixed(2)} MB)
-                      </option>
-                    ))}
-                  </select>
+                  <label className="form-label">Hochgeladene JAR-Datei auswählen</label>
+                  {jars.length === 0 ? (
+                    <div style={{ padding: '12px 14px', borderRadius: 'var(--border-radius)', backgroundColor: 'rgba(235, 94, 40, 0.1)', border: '1px solid var(--warning)', color: 'var(--warning)', fontSize: '0.85rem' }}>
+                      ⚠️ Es sind keine Server-JARs hochgeladen. Bitte lade zuerst im Tab &quot;Dateiverwaltung&quot; eine Paper-JAR hoch.
+                    </div>
+                  ) : (
+                    <select
+                      className="form-select"
+                      value={jarFile}
+                      onChange={(e) => setJarFile(e.target.value)}
+                      required
+                    >
+                      <option value="">-- Bitte JAR-Datei auswählen --</option>
+                      {jars.map((jar) => (
+                        <option key={jar.name} value={jar.name}>
+                          {jar.name} {jar.description ? `(${jar.description})` : ''} - ({(jar.size / (1024 * 1024)).toFixed(2)} MB)
+                        </option>
+                      ))}
+                    </select>
+                  )}
                 </div>
               )}
 
               {type === 'CURSEFORGE' && (
                 <div className="form-group">
                   <label className="form-label">CurseForge Server Pack (.zip) auswählen</label>
-                  <select
-                    className="form-select"
-                    value={curseForgeZip}
-                    onChange={(e) => setCurseForgeZip(e.target.value)}
-                    required
-                  >
-                    <option value="">-- Bitte ZIP-Datei auswählen --</option>
-                    {zips.map((zip) => (
-                      <option key={zip.name} value={zip.name}>
-                        {zip.name} ({(zip.size / (1024 * 1024)).toFixed(2)} MB)
-                      </option>
-                    ))}
-                  </select>
-                  {zips.length === 0 && (
-                    <p style={{ color: 'var(--warning)', fontSize: '0.8rem', marginTop: '6px' }}>
-                      Bitte lade zuerst ein CurseForge Server Pack (.zip) im Upload-Bereich hoch.
-                    </p>
+                  {zips.length === 0 ? (
+                    <div style={{ padding: '12px 14px', borderRadius: 'var(--border-radius)', backgroundColor: 'rgba(235, 94, 40, 0.1)', border: '1px solid var(--warning)', color: 'var(--warning)', fontSize: '0.85rem' }}>
+                      ⚠️ Es sind keine CurseForge Packs hochgeladen. Bitte lade zuerst im Tab &quot;Dateiverwaltung&quot; ein Modpack hoch.
+                    </div>
+                  ) : (
+                    <select
+                      className="form-select"
+                      value={curseForgeZip}
+                      onChange={(e) => setCurseForgeZip(e.target.value)}
+                      required
+                    >
+                      <option value="">-- Bitte ZIP-Datei auswählen --</option>
+                      {zips.map((zip) => (
+                        <option key={zip.name} value={zip.name}>
+                          {zip.name} {zip.description ? `(${zip.description})` : ''} - ({(zip.size / (1024 * 1024)).toFixed(2)} MB)
+                        </option>
+                      ))}
+                    </select>
                   )}
-                </div>
-              )}
-
-              {type !== 'ARK' && (
-                <div className="form-group">
-                  <label className="form-label">Owner Ingame Name (automatischer OP)</label>
-                  <input
-                    type="text"
-                    className="form-input"
-                    value={opPlayer}
-                    onChange={(e) => setOpPlayer(e.target.value)}
-                    placeholder="z.B. Notch (optional)"
-                  />
                 </div>
               )}
 
@@ -997,7 +1171,11 @@ export default function DashboardClient({ user }: { user: User }) {
                 <button type="button" className="btn btn-secondary" onClick={() => setModalOpen(false)}>
                   Abbrechen
                 </button>
-                <button type="submit" className="btn btn-primary" disabled={createLoading}>
+                <button
+                  type="submit"
+                  className="btn btn-primary"
+                  disabled={createLoading || (type === 'PAPER' && jars.length === 0) || (type === 'CURSEFORGE' && zips.length === 0)}
+                >
                   {createLoading ? 'Erstelle...' : 'Server erstellen'}
                 </button>
               </div>

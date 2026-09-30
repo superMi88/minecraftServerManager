@@ -18,11 +18,7 @@ export async function POST(request: NextRequest, { params }: { params: Params })
       return NextResponse.json({ success: false, error: 'Server nicht gefunden.' }, { status: 404 });
     }
 
-    const { type: serverType } = result;
-    if (serverType === 'ARK') {
-      return NextResponse.json({ success: false, error: 'Rollback wird für Ark-Server nicht unterstützt.' }, { status: 400 });
-    }
-
+    const { server, type: serverType } = result;
     const isPaper = serverType === 'PAPER';
 
     // Check if server is running
@@ -53,14 +49,14 @@ export async function POST(request: NextRequest, { params }: { params: Params })
 
     // 3. Read metadata to restore database entries
     const metadataPath = path.join(serverFolder, 'update_metadata.json');
-    let previousJarFile = 'server.jar';
+    let previousJarFile = isPaper ? (server as import('@prisma/client').MinecraftServer).jarFile : '';
     let previousCurseForgeZip: string | null = null;
     let previousStartScript = 'run.sh';
 
     if (fs.existsSync(metadataPath)) {
       try {
         const metadata = JSON.parse(fs.readFileSync(metadataPath, 'utf-8'));
-        previousJarFile = metadata.previousJarFile || 'server.jar';
+        previousJarFile = metadata.previousJarFile || previousJarFile;
         previousCurseForgeZip = metadata.previousCurseForgeZip || null;
         previousStartScript = metadata.previousStartScript || 'run.sh';
       } catch (err) {

@@ -89,16 +89,8 @@ export async function PATCH(request: NextRequest, { params }: { params: Params }
       memoryMin,
       memoryMax,
       jarFile,
-      opPlayer,
       curseForgeZip,
       startScript,
-      queryPort,
-      rconPort,
-      maxPlayers,
-      map,
-      serverPassword,
-      adminPassword,
-      installed
     } = body;
 
     const result = await findServer(id);
@@ -119,17 +111,14 @@ export async function PATCH(request: NextRequest, { params }: { params: Params }
       updateData.port = portInt;
     }
 
-    if (serverType === 'PAPER' || serverType === 'CURSEFORGE') {
-      if (memoryMin !== undefined) updateData.memoryMin = memoryMin;
-      if (memoryMax !== undefined) updateData.memoryMax = memoryMax;
-      if (opPlayer !== undefined) updateData.opPlayer = opPlayer || null;
-    }
+    if (memoryMin !== undefined) updateData.memoryMin = memoryMin;
+    if (memoryMax !== undefined) updateData.memoryMax = memoryMax;
 
     if (serverType === 'PAPER') {
       if (jarFile !== undefined) {
         updateData.jarFile = jarFile;
         const folderPath = getServerFolderPath(id);
-        const globalJarPath = path.join(process.cwd(), 'uploads', 'jars', jarFile);
+        const globalJarPath = path.join(process.cwd(), 'uploads', 'minecraft', 'jars', jarFile);
         if (fs.existsSync(globalJarPath)) {
           const destPath = path.join(folderPath, jarFile);
           if (!fs.existsSync(destPath)) {
@@ -155,7 +144,7 @@ export async function PATCH(request: NextRequest, { params }: { params: Params }
             }
           }
 
-          const globalZipPath = path.join(process.cwd(), 'uploads', 'zips', curseForgeZip);
+          const globalZipPath = path.join(process.cwd(), 'uploads', 'curseforge', curseForgeZip);
           if (fs.existsSync(globalZipPath)) {
             try {
               const directory = await unzipper.Open.file(globalZipPath);
@@ -203,16 +192,6 @@ export async function PATCH(request: NextRequest, { params }: { params: Params }
           }
         }
       }
-    }
-
-    if (serverType === 'ARK') {
-      if (queryPort !== undefined) updateData.queryPort = parseInt(queryPort, 10);
-      if (rconPort !== undefined) updateData.rconPort = parseInt(rconPort, 10);
-      if (maxPlayers !== undefined) updateData.maxPlayers = parseInt(maxPlayers, 10);
-      if (map !== undefined) updateData.map = map;
-      if (serverPassword !== undefined) updateData.serverPassword = serverPassword || null;
-      if (adminPassword !== undefined) updateData.adminPassword = adminPassword;
-      if (installed !== undefined) updateData.installed = installed;
     }
 
     const updatedServer = await updateServer(id, serverType, updateData);

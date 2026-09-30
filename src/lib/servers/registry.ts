@@ -2,15 +2,13 @@ import { prisma } from '../db';
 import { GameServerHandler } from './base';
 import { PaperHandler } from './paper';
 import { CurseForgeHandler } from './curseforge';
-import { ArkHandler } from './ark';
-import { MinecraftServer, CurseForgeServer, ArkServer } from '@prisma/client';
+import { MinecraftServer, CurseForgeServer } from '@prisma/client';
 
-export type ServerUnion = MinecraftServer | CurseForgeServer | ArkServer;
+export type ServerUnion = MinecraftServer | CurseForgeServer;
 
 const handlers: Record<string, GameServerHandler> = {
   PAPER: new PaperHandler(),
   CURSEFORGE: new CurseForgeHandler(),
-  ARK: new ArkHandler(),
 };
 
 export function getHandler(type: string): GameServerHandler {
@@ -21,7 +19,7 @@ export function getHandler(type: string): GameServerHandler {
   return handler;
 }
 
-export async function findServer(id: string): Promise<{ server: ServerUnion; type: 'PAPER' | 'CURSEFORGE' | 'ARK' } | null> {
+export async function findServer(id: string): Promise<{ server: ServerUnion; type: 'PAPER' | 'CURSEFORGE' } | null> {
   // Try Paper
   const paperServer = await prisma.minecraftServer.findUnique({ where: { id } });
   if (paperServer) {
@@ -34,26 +32,18 @@ export async function findServer(id: string): Promise<{ server: ServerUnion; typ
     return { server: cfServer, type: 'CURSEFORGE' };
   }
 
-  // Try Ark
-  const arkServer = await prisma.arkServer.findUnique({ where: { id } });
-  if (arkServer) {
-    return { server: arkServer, type: 'ARK' };
-  }
-
   return null;
 }
 
-export async function deleteServer(id: string, type: 'PAPER' | 'CURSEFORGE' | 'ARK'): Promise<void> {
+export async function deleteServer(id: string, type: 'PAPER' | 'CURSEFORGE'): Promise<void> {
   if (type === 'PAPER') {
     await prisma.minecraftServer.delete({ where: { id } });
   } else if (type === 'CURSEFORGE') {
     await prisma.curseForgeServer.delete({ where: { id } });
-  } else if (type === 'ARK') {
-    await prisma.arkServer.delete({ where: { id } });
   }
 }
 
-export async function updateServer(id: string, type: 'PAPER' | 'CURSEFORGE' | 'ARK', data: Record<string, unknown>): Promise<ServerUnion | null> {
+export async function updateServer(id: string, type: 'PAPER' | 'CURSEFORGE', data: Record<string, unknown>): Promise<ServerUnion | null> {
   if (type === 'PAPER') {
     return await prisma.minecraftServer.update({
       where: { id },
@@ -64,27 +54,21 @@ export async function updateServer(id: string, type: 'PAPER' | 'CURSEFORGE' | 'A
       where: { id },
       data,
     });
-  } else if (type === 'ARK') {
-    return await prisma.arkServer.update({
-      where: { id },
-      data,
-    });
   }
   return null;
 }
 
-export async function getAllServers(): Promise<(ServerUnion & { type: 'PAPER' | 'CURSEFORGE' | 'ARK' })[]> {
-  const [paperServers, cfServers, arkServers] = await Promise.all([
+export async function getAllServers(): Promise<(ServerUnion & { type: 'PAPER' | 'CURSEFORGE' })[]> {
+  const [paperServers, cfServers] = await Promise.all([
     prisma.minecraftServer.findMany(),
     prisma.curseForgeServer.findMany(),
-    prisma.arkServer.findMany(),
   ]);
 
   const dbServers = [
     ...paperServers.map((s) => ({ ...s, type: 'PAPER' as const })),
     ...cfServers.map((s) => ({ ...s, type: 'CURSEFORGE' as const })),
-    ...arkServers.map((s) => ({ ...s, type: 'ARK' as const })),
   ];
 
   return dbServers.sort((a, b) => b.createdAt.getTime() - a.createdAt.getTime());
 }
+

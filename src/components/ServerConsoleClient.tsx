@@ -18,42 +18,12 @@ interface ServerConsoleClientProps {
   user: User;
 }
 
-const uploadInChunks = async (
-  file: File,
-  url: string,
-  onProgress: (progress: number) => void,
-  chunkSize: number = 2 * 1024 * 1024 // 2MB chunks
-) => {
-  const totalChunks = Math.ceil(file.size / chunkSize);
-  for (let index = 0; index < totalChunks; index++) {
-    const start = index * chunkSize;
-    const end = Math.min(start + chunkSize, file.size);
-    const chunk = file.slice(start, end);
-    
-    const formData = new FormData();
-    formData.append('file', chunk, file.name);
-    formData.append('chunkIndex', index.toString());
-    formData.append('totalChunks', totalChunks.toString());
-    formData.append('originalName', file.name);
-
-    const res = await fetch(url, {
-      method: 'POST',
-      body: formData,
-    });
-
-    if (!res.ok) {
-      const data = await res.json().catch(() => ({}));
-      throw new Error(data.error || `Chunk ${index + 1}/${totalChunks} upload failed.`);
-    }
-
-    const data = await res.json();
-    if (!data.success) {
-      throw new Error(data.error || `Chunk ${index + 1}/${totalChunks} upload failed.`);
-    }
-
-    onProgress(Math.round(((index + 1) / totalChunks) * 100));
-  }
-};
+interface UploadedFileItem {
+  name: string;
+  size: number;
+  createdAt: string;
+  description?: string;
+}
 
 export default function ServerConsoleClient({
   serverId,
@@ -63,8 +33,8 @@ export default function ServerConsoleClient({
 }: ServerConsoleClientProps) {
   const router = useRouter();
   
-  // Tab control
-  const [activeTab, setActiveTab] = useState<'console' | 'properties' | 'plugins' | 'files' | 'backups' | 'settings' | 'update'>('console');
+  // Tab control (Files tab removed)
+  const [activeTab, setActiveTab] = useState<'console' | 'properties' | 'plugins' | 'backups' | 'settings' | 'update'>('console');
   
   // Console tab states
   const [logs, setLogs] = useState('Lade Logs...');
@@ -78,22 +48,23 @@ export default function ServerConsoleClient({
   const [propertiesError, setPropertiesError] = useState<string | null>(null);
   const [propertiesSuccess, setPropertiesSuccess] = useState<string | null>(null);
   
-  // Files tab states
+  // Plugins tab states
   const [plugins, setPlugins] = useState<string[]>([]);
   const [pluginsLoading, setPluginsLoading] = useState(false);
-  const [uploadFile, setUploadFile] = useState<File | null>(null);
-  const [uploadLoading, setUploadLoading] = useState(false);
-  const [uploadError, setUploadError] = useState<string | null>(null);
-  const [uploadSuccess, setUploadSuccess] = useState<string | null>(null);
-  const [uploadProgress, setUploadProgress] = useState<number | null>(null);
-  const [isFileDragging, setIsFileDragging] = useState(false);
+  const [globalPlugins, setGlobalPlugins] = useState<UploadedFileItem[]>([]);
+  const [pluginFilter, setPluginFilter] = useState('');
+  const [togglingPluginName, setTogglingPluginName] = useState<string | null>(null);
+  const [draggedPlugin, setDraggedPlugin] = useState<string | null>(null);
+  const [isDropActive, setIsDropActive] = useState(false);
+  const [pluginSuccessMsg, setPluginSuccessMsg] = useState<string | null>(null);
+  const [pluginErrorMsg, setPluginErrorMsg] = useState<string | null>(null);
   
   // Settings tab states
   const [name, setName] = useState(initialServerName);
   const [port, setPort] = useState('25565');
   const [memoryMin, setMemoryMin] = useState('2048M');
   const [memoryMax, setMemoryMax] = useState('6144M');
-  const [jarFile, setJarFile] = useState('server.jar');
+  const [jarFile, setJarFile] = useState('');
   const [curseForgeZip, setCurseForgeZip] = useState('');
   const [startScript, setStartScript] = useState('run.sh');
   const [availableShFiles, setAvailableShFiles] = useState<string[]>([]);
@@ -103,24 +74,13 @@ export default function ServerConsoleClient({
   const [scriptInput, setScriptInput] = useState('');
   const [scriptOutput, setScriptOutput] = useState<{ code: number | null; stdout: string; stderr: string } | null>(null);
   const [scriptError, setScriptError] = useState<string | null>(null);
-  const [opPlayer, setOpPlayer] = useState('');
   const [settingsLoading, setSettingsLoading] = useState(false);
   const [settingsError, setSettingsError] = useState<string | null>(null);
   const [settingsSuccess, setSettingsSuccess] = useState<string | null>(null);
 
-  // Ark specific settings states
-  const [queryPort, setQueryPort] = useState('27015');
-  const [rconPort, setRconPort] = useState('27020');
-  const [maxPlayers, setMaxPlayers] = useState('20');
-  const [map, setMap] = useState('TheIsland_WP');
-  const [serverPassword, setServerPassword] = useState('');
-  const [adminPassword, setAdminPassword] = useState('adminpass');
-  const [installed, setInstalled] = useState(false);
-  
-  const [zips, setZips] = useState<{ name: string; size: number; createdAt: string }[]>([]);
-  const [jars, setJars] = useState<{ name: string; size: number; createdAt: string }[]>([]);
-  const [globalPlugins, setGlobalPlugins] = useState<{ name: string; size: number; createdAt: string }[]>([]);
-  const [togglingPluginName, setTogglingPluginName] = useState<string | null>(null);
+  // Global upload files
+  const [zips, setZips] = useState<UploadedFileItem[]>([]);
+  const [jars, setJars] = useState<UploadedFileItem[]>([]);
 
   // Update/Rollback states
   const [targetJar, setTargetJar] = useState('');
@@ -162,27 +122,15 @@ export default function ServerConsoleClient({
         setPort(data.server.port.toString());
         setMemoryMin(data.server.memoryMin || '');
         setMemoryMax(data.server.memoryMax || '');
-        setJarFile(data.server.jarFile || 'server.jar');
+        setJarFile(data.server.jarFile || '');
         setCurseForgeZip(data.server.curseForgeZip || '');
         setStartScript(data.server.startScript || 'run.sh');
         setAvailableShFiles(data.server.availableShFiles || []);
         if (data.server.availableShFiles && data.server.availableShFiles.length > 0 && !selectedShFile) {
           setSelectedShFile(data.server.availableShFiles[0]);
         }
-        setOpPlayer(data.server.opPlayer || '');
         setIsRunning(data.server.isRunning);
         setRollbackAvailable(data.server.rollbackAvailable || false);
-        
-        // Ark settings loading
-        if (data.server.type === 'ARK') {
-          setQueryPort(data.server.queryPort?.toString() || '27015');
-          setRconPort(data.server.rconPort?.toString() || '27020');
-          setMaxPlayers(data.server.maxPlayers?.toString() || '20');
-          setMap(data.server.map || 'TheIsland_WP');
-          setServerPassword(data.server.serverPassword || '');
-          setAdminPassword(data.server.adminPassword || 'adminpass');
-          setInstalled(data.server.installed || false);
-        }
       }
     } catch (err) {
       console.error('Failed to load server metadata', err);
@@ -194,21 +142,37 @@ export default function ServerConsoleClient({
       const res = await fetch('/api/uploads');
       const data = await res.json();
       if (res.ok && data.success) {
-        setZips(data.zips);
-        setJars(data.jars);
-        setGlobalPlugins(data.plugins || []);
+        setZips(data.curseforge || data.zips || []);
+        setJars(data.minecraft?.jars || data.jars || []);
+        setGlobalPlugins(data.minecraft?.plugins || data.plugins || []);
       }
     } catch (err) {
       console.error('Failed to fetch uploads:', err);
     }
   }, []);
 
+  const fetchPlugins = useCallback(async () => {
+    setPluginsLoading(true);
+    try {
+      const res = await fetch(`/api/servers/${serverId}/plugins`);
+      const data = await res.json();
+      if (res.ok && data.success) {
+        setPlugins(data.plugins || []);
+      }
+    } catch (err) {
+      console.error(err);
+    } finally {
+      setPluginsLoading(false);
+    }
+  }, [serverId]);
+
   useEffect(() => {
     Promise.resolve().then(() => {
       fetchMetadata();
       fetchUploads();
+      fetchPlugins();
     });
-  }, [fetchMetadata, fetchUploads]);
+  }, [fetchMetadata, fetchUploads, fetchPlugins]);
 
   const fetchBackups = useCallback(async () => {
     setBackupsLoading(true);
@@ -249,16 +213,41 @@ export default function ServerConsoleClient({
         setBackupError(data.error || 'Failed to create backup.');
       }
     } catch {
-      setBackupError('Network error creating backup.');
+      setBackupError('Failed to create backup due to network error.');
     } finally {
       setBackupCreateLoading(false);
     }
   };
 
-  const handleDeleteBackup = async (backupName: string) => {
-    if (!confirm(`Möchtest du das Backup "${backupName}" wirklich unwiderruflich löschen?`)) {
+  const handleRestoreBackup = async (backupName: string) => {
+    if (isRunning) {
+      alert('Der Server muss ausgeschaltet sein, um ein Backup wiederherzustellen.');
       return;
     }
+    if (!confirm(`Möchtest du das Backup "${backupName}" wirklich wiederherstellen? Die aktuelle Welt wird überschrieben.`)) {
+      return;
+    }
+    setBackupError(null);
+    setBackupSuccess(null);
+    try {
+      const res = await fetch(`/api/servers/${serverId}/backups`, {
+        method: 'PUT',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ backupName }),
+      });
+      const data = await res.json();
+      if (res.ok && data.success) {
+        setBackupSuccess(data.message);
+      } else {
+        setBackupError(data.error || 'Failed to restore backup.');
+      }
+    } catch {
+      setBackupError('Network error restoring backup.');
+    }
+  };
+
+  const handleDeleteBackup = async (backupName: string) => {
+    if (!confirm(`Möchtest du das Backup "${backupName}" wirklich löschen?`)) return;
     try {
       const res = await fetch(`/api/servers/${serverId}/backups?name=${encodeURIComponent(backupName)}`, {
         method: 'DELETE',
@@ -267,23 +256,24 @@ export default function ServerConsoleClient({
       if (res.ok && data.success) {
         fetchBackups();
       } else {
-        alert(data.error || 'Failed to delete backup.');
+        alert(data.error || 'Failed to delete backup');
       }
-    } catch (err) {
-      console.error(err);
-      alert('Network error deleting backup.');
+    } catch {
+      alert('Network error deleting backup');
     }
   };
 
+  // Run initial tab fetches
   useEffect(() => {
     Promise.resolve().then(() => {
       if (activeTab === 'settings' || activeTab === 'update' || activeTab === 'plugins') {
         fetchUploads();
+        fetchPlugins();
       } else if (activeTab === 'backups') {
         fetchBackups();
       }
     });
-  }, [activeTab, fetchUploads, fetchBackups]);
+  }, [activeTab, fetchUploads, fetchBackups, fetchPlugins]);
 
   // Poll Logs / Status
   useEffect(() => {
@@ -338,33 +328,8 @@ export default function ServerConsoleClient({
     }
   }, [serverId, activeTab]);
 
-  // Fetch Plugins when switching to Files/Plugins tab
-  const fetchPlugins = useCallback(async () => {
-    setPluginsLoading(true);
-    try {
-      const res = await fetch(`/api/servers/${serverId}/plugins`);
-      const data = await res.json();
-      if (res.ok && data.success) {
-        setPlugins(data.plugins);
-      }
-    } catch (err) {
-      console.error(err);
-    } finally {
-      setPluginsLoading(false);
-    }
-  }, [serverId]);
-
-  useEffect(() => {
-    if (activeTab === 'files' || activeTab === 'plugins') {
-      Promise.resolve().then(() => {
-        fetchPlugins();
-      });
-    }
-  }, [activeTab, fetchPlugins]);
-
   // Server Control Action (START / STOP / RESTART)
   const handleControlAction = async (action: 'START' | 'STOP' | 'RESTART') => {
-    // Optimistic UI update
     if (action === 'START') {
       setIsRunning(true);
       setLogs((prev) => prev + '\n[System] Starte Server...\n');
@@ -381,7 +346,8 @@ export default function ServerConsoleClient({
       });
       const data = await res.json();
       if (!res.ok || !data.success) {
-        alert(`Action failed: ${data.error || 'Unknown error'}`);
+        alert(`Aktion fehlgeschlagen: ${data.error || 'Unbekannter Fehler'}`);
+        fetchMetadata();
       }
     } catch (err) {
       console.error(err);
@@ -394,7 +360,7 @@ export default function ServerConsoleClient({
     if (!command.trim()) return;
 
     const cmdToSend = command.trim();
-    setCommand(''); // instantly clear input
+    setCommand('');
 
     try {
       const res = await fetch(`/api/servers/${serverId}/command`, {
@@ -428,65 +394,21 @@ export default function ServerConsoleClient({
       if (res.ok && data.success) {
         setPropertiesSuccess('Datei "server.properties" erfolgreich gespeichert!');
       } else {
-        setPropertiesError(data.error || 'Failed to save properties.');
+        setPropertiesError(data.error || 'Fehler beim Speichern der Properties.');
       }
     } catch (err) {
       console.error(err);
-      setPropertiesError('Network error saving properties.');
+      setPropertiesError('Netzwerkfehler beim Speichern der Properties.');
     } finally {
       setPropertiesLoading(false);
     }
   };
 
-  // Upload File (Plugin or Modpack ZIP)
-  const handleFileUpload = async (e: React.FormEvent) => {
-    e.preventDefault();
-    if (!uploadFile) return;
-
-    setUploadLoading(true);
-    setUploadError(null);
-    setUploadSuccess(null);
-    setUploadProgress(0);
-
-    try {
-      await uploadInChunks(uploadFile, `/api/servers/${serverId}/upload`, setUploadProgress);
-      setUploadSuccess(`Datei "${uploadFile.name}" erfolgreich hochgeladen.`);
-      setUploadFile(null);
-      // Refresh file listings
-      fetchPlugins();
-      fetchMetadata();
-    } catch (err) {
-      console.error(err);
-      const message = err instanceof Error ? err.message : 'Netzwerkfehler beim Hochladen.';
-      setUploadError(message);
-    } finally {
-      setUploadLoading(false);
-      setUploadProgress(null);
-    }
-  };
-
-  // Delete Plugin
-  const handleDeletePlugin = async (pluginName: string) => {
-    if (!confirm(`Möchtest du das Plugin "${pluginName}" wirklich löschen?`)) return;
-
-    try {
-      const res = await fetch(`/api/servers/${serverId}/plugins?name=${encodeURIComponent(pluginName)}`, {
-        method: 'DELETE',
-      });
-      const data = await res.json();
-
-      if (res.ok && data.success) {
-        fetchPlugins(); // reload list
-      } else {
-        alert(data.error || 'Failed to delete plugin');
-      }
-    } catch (err) {
-      console.error(err);
-    }
-  };
-
+  // Plugin activate/deactivate
   const handleTogglePlugin = async (pluginName: string, currentlyInstalled: boolean) => {
     setTogglingPluginName(pluginName);
+    setPluginSuccessMsg(null);
+    setPluginErrorMsg(null);
     try {
       const res = await fetch(`/api/servers/${serverId}/plugins`, {
         method: 'POST',
@@ -498,13 +420,18 @@ export default function ServerConsoleClient({
       });
       const data = await res.json();
       if (res.ok && data.success) {
+        setPluginSuccessMsg(
+          currentlyInstalled
+            ? `Plugin "${pluginName}" deaktiviert.`
+            : `Plugin "${pluginName}" erfolgreich aktiviert!`
+        );
         fetchPlugins();
       } else {
-        alert(data.error || 'Fehler beim Ändern des Plugin-Zustands.');
+        setPluginErrorMsg(data.error || 'Fehler beim Ändern des Plugin-Zustands.');
       }
     } catch (err) {
       console.error(err);
-      alert('Netzwerkfehler beim Ändern des Plugins.');
+      setPluginErrorMsg('Netzwerkfehler beim Ändern des Plugins.');
     } finally {
       setTogglingPluginName(null);
     }
@@ -584,51 +511,41 @@ export default function ServerConsoleClient({
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
           port,
-          memoryMin: serverType !== 'ARK' ? memoryMin : undefined,
-          memoryMax: serverType !== 'ARK' ? memoryMax : undefined,
+          memoryMin,
+          memoryMax,
           jarFile: serverType === 'PAPER' ? jarFile : undefined,
           curseForgeZip: serverType === 'CURSEFORGE' ? curseForgeZip : undefined,
           startScript: serverType === 'CURSEFORGE' ? startScript : undefined,
-          opPlayer: serverType !== 'ARK' ? opPlayer || undefined : undefined,
-          queryPort: serverType === 'ARK' ? queryPort : undefined,
-          rconPort: serverType === 'ARK' ? rconPort : undefined,
-          maxPlayers: serverType === 'ARK' ? maxPlayers : undefined,
-          map: serverType === 'ARK' ? map : undefined,
-          serverPassword: serverType === 'ARK' ? serverPassword : undefined,
-          adminPassword: serverType === 'ARK' ? adminPassword : undefined,
         }),
       });
       const data = await res.json();
 
       if (res.ok && data.success) {
-        setSettingsSuccess('Server-Einstellungen erfolgreich gespeichert!');
+        setSettingsSuccess('Einstellungen erfolgreich gespeichert.');
         fetchMetadata();
       } else {
-        setSettingsError(data.error || 'Failed to update settings.');
+        setSettingsError(data.error || 'Fehler beim Speichern der Einstellungen.');
       }
     } catch (err) {
       console.error(err);
-      setSettingsError('Network error saving settings.');
+      setSettingsError('Netzwerkfehler beim Speichern der Einstellungen.');
     } finally {
       setSettingsLoading(false);
     }
   };
 
+  // Execute Shell Script
   const handleExecuteScript = async () => {
-    if (!selectedShFile) {
-      setScriptError('Bitte wähle ein Skript zum Ausführen aus.');
-      return;
-    }
-    
+    if (!selectedShFile) return;
     if (isRunning) {
-      alert('Der Server muss ausgeschaltet sein, um ein Skript auszuführen.');
+      alert('Der Server muss gestoppt sein, um ein Skript auszuführen.');
       return;
     }
 
     setScriptExecuting(true);
     setScriptError(null);
-    setScriptLogs('Starte Skript...');
     setScriptOutput(null);
+    setScriptLogs('Starte Skript...\n');
 
     try {
       const res = await fetch(`/api/servers/${serverId}/execute-sh`, {
@@ -636,10 +553,9 @@ export default function ServerConsoleClient({
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ scriptName: selectedShFile }),
       });
-      
       const data = await res.json();
       if (!res.ok || !data.success) {
-        setScriptError(data.error || 'Fehler beim Starten des Skripts.');
+        setScriptError(data.error || 'Skript-Start fehlgeschlagen.');
         setScriptExecuting(false);
       }
     } catch (err) {
@@ -649,84 +565,63 @@ export default function ServerConsoleClient({
     }
   };
 
-  // Poll Script Logs & Status when a script is executing
+  // Poll Script Logs
   useEffect(() => {
-    let interval: NodeJS.Timeout;
-
-    const pollScriptStatus = async () => {
-      try {
-        const res = await fetch(`/api/servers/${serverId}/execute-sh`);
-        const data = await res.json();
-        if (res.ok && data.success) {
-          setScriptLogs(data.logs || '');
-          if (!data.isRunning) {
-            setScriptExecuting(false);
-            setScriptOutput({
-              code: data.exitCode,
-              stdout: data.logs || '',
-              stderr: '',
-            });
-          }
-        }
-      } catch (err) {
-        console.error('Error polling script status:', err);
-      }
-    };
-
+    let scriptInterval: NodeJS.Timeout;
     if (scriptExecuting) {
-      pollScriptStatus();
-      interval = setInterval(pollScriptStatus, 1000); // poll every 1s
+      scriptInterval = setInterval(async () => {
+        try {
+          const res = await fetch(`/api/servers/${serverId}/execute-sh`);
+          const data = await res.json();
+          if (res.ok && data.success) {
+            setScriptLogs(data.logs);
+            if (!data.isRunning) {
+              setScriptExecuting(false);
+              setScriptOutput({
+                code: data.exitCode,
+                stdout: data.logs,
+                stderr: '',
+              });
+            }
+          }
+        } catch (err) {
+          console.error('Fehler beim Abrufen der Skript-Logs:', err);
+        }
+      }, 1000);
     }
-
     return () => {
-      if (interval) clearInterval(interval);
+      if (scriptInterval) clearInterval(scriptInterval);
     };
-  }, [serverId, scriptExecuting]);
+  }, [scriptExecuting, serverId]);
 
+  // Send input to running script
   const handleSendScriptInput = async (e: React.FormEvent) => {
     e.preventDefault();
-    if (!scriptInput.trim()) return;
-
-    const textToSend = scriptInput.trim();
+    if (!scriptInput) return;
+    const inputToSend = scriptInput;
     setScriptInput('');
 
     try {
-      const res = await fetch(`/api/servers/${serverId}/execute-sh`, {
+      await fetch(`/api/servers/${serverId}/execute-sh`, {
         method: 'PUT',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ input: textToSend }),
+        body: JSON.stringify({ input: inputToSend }),
       });
-      const data = await res.json();
-      if (!res.ok || !data.success) {
-        setScriptError(data.error || 'Fehler beim Senden der Eingabe.');
-      }
     } catch (err) {
-      console.error(err);
-      setScriptError('Netzwerkfehler beim Senden der Eingabe.');
+      console.error('Fehler beim Senden der Skript-Eingabe:', err);
     }
   };
 
-  const handleCancelScript = async () => {
-    if (!confirm('Möchtest du die Ausführung des Skripts wirklich abbrechen?')) return;
-
+  // Abort running script
+  const handleStopScript = async () => {
     try {
-      const res = await fetch(`/api/servers/${serverId}/execute-sh`, {
-        method: 'DELETE',
-      });
-      const data = await res.json();
-      if (res.ok && data.success) {
-        setScriptExecuting(false);
-        setScriptLogs((prev) => prev + '\n[System] Skript-Ausführung vom Benutzer abgebrochen.\n');
-      } else {
-        alert(data.error || 'Fehler beim Abbrechen des Skripts.');
-      }
+      await fetch(`/api/servers/${serverId}/execute-sh`, { method: 'DELETE' });
     } catch (err) {
-      console.error(err);
-      alert('Netzwerkfehler beim Abbrechen des Skripts.');
+      console.error('Fehler beim Abbrechen des Skripts:', err);
     }
   };
 
-  // Delete entire server
+  // Delete Server
   const handleDeleteServer = async () => {
     setDeleteLoading(true);
     try {
@@ -734,21 +629,23 @@ export default function ServerConsoleClient({
         method: 'DELETE',
       });
       const data = await res.json();
-
       if (res.ok && data.success) {
         router.push('/');
       } else {
-        alert(data.error || 'Failed to delete server');
+        alert(data.error || 'Fehler beim Löschen des Servers.');
         setDeleteLoading(false);
-        setDeleteModalOpen(false);
       }
     } catch (err) {
       console.error(err);
-      alert('Network error deleting server.');
+      alert('Netzwerkfehler beim Löschen des Servers.');
       setDeleteLoading(false);
-      setDeleteModalOpen(false);
     }
   };
+
+  const filteredGlobalPlugins = globalPlugins.filter((p) =>
+    p.name.toLowerCase().includes(pluginFilter.toLowerCase()) ||
+    (p.description && p.description.toLowerCase().includes(pluginFilter.toLowerCase()))
+  );
 
   return (
     <div>
@@ -759,38 +656,76 @@ export default function ServerConsoleClient({
           <span>Minecraft Server Manager</span>
         </Link>
         <div className="user-profile">
+          <div
+            style={{
+              background: 'var(--primary)',
+              color: 'white',
+              width: '36px',
+              height: '36px',
+              borderRadius: '50%',
+              display: 'flex',
+              alignItems: 'center',
+              justifyContent: 'center',
+              fontWeight: 'bold',
+            }}
+          >
+            {user.username.charAt(0).toUpperCase()}
+          </div>
           <span style={{ fontWeight: 600 }}>{user.username}</span>
-          <Link href="/" className="btn btn-secondary" style={{ padding: '6px 12px', fontSize: '0.85rem' }}>
-            Zurück
-          </Link>
+          <form action="/api/auth/logout" method="POST" style={{ display: 'inline' }}>
+            <button type="submit" className="btn btn-secondary" style={{ padding: '6px 12px', fontSize: '0.85rem' }}>
+              Abmelden
+            </button>
+          </form>
         </div>
       </header>
 
-      {/* Main Content */}
-      <main className="main-content">
+      {/* Main Container */}
+      <main className="container">
+        {/* Navigation Breadcrumb & Back */}
+        <div style={{ marginBottom: '16px' }}>
+          <Link href="/" style={{ color: 'var(--text-muted)', fontSize: '0.9rem', display: 'inline-flex', alignItems: 'center', gap: '6px' }}>
+            <svg style={{ width: '16px', height: '16px' }} fill="none" stroke="currentColor" viewBox="0 0 24 24">
+              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M10 19l-7-7m0 0l7-7m-7 7h18" />
+            </svg>
+            Zurück zur Serverübersicht
+          </Link>
+        </div>
+
+        {/* Server Header & Controls */}
         <div className="flex-between" style={{ marginBottom: '24px' }}>
           <div>
-            <h1 style={{ fontSize: '1.75rem', fontWeight: 800, color: '#fff', marginBottom: '4px' }}>{name}</h1>
-            <p style={{ color: 'var(--text-muted)' }}>
-              Servertyp: {serverType === 'PAPER' ? 'Paper (Plugins)' : serverType === 'CURSEFORGE' ? 'CurseForge Modpack' : 'Ark: Survival Ascended'} | Port: {port}
+            <div style={{ display: 'flex', alignItems: 'center', gap: '12px', marginBottom: '4px' }}>
+              <h1 style={{ fontSize: '2rem', fontWeight: 800, color: '#fff' }}>{name}</h1>
+              <span className={`status-dot ${isRunning ? 'online' : 'offline'}`} />
+              <span style={{ fontSize: '0.95rem', fontWeight: 600, color: isRunning ? 'var(--success)' : 'var(--danger)' }}>
+                {isRunning ? 'Online' : 'Offline'}
+              </span>
+            </div>
+            <p style={{ color: 'var(--text-muted)', fontSize: '0.9rem' }}>
+              Servertyp: {serverType === 'PAPER' ? 'Paper (Plugins)' : 'CurseForge Modpack'} | Port: {port}
             </p>
           </div>
-          
-          <div className="flex-gap">
-            <span className={`badge ${isRunning ? 'badge-success' : 'badge-danger'}`} style={{ padding: '8px 14px' }}>
-              {isRunning ? 'Online' : 'Offline'}
-            </span>
+
+          <div style={{ display: 'flex', gap: '10px' }}>
             <button
-              onClick={() => handleControlAction(isRunning ? 'STOP' : 'START')}
-              className={`btn ${isRunning ? 'btn-danger' : 'btn-success'}`}
-              disabled={serverType === 'ARK' && !installed}
+              onClick={() => handleControlAction('START')}
+              className="btn btn-success"
+              disabled={isRunning}
             >
-              {isRunning ? 'Stoppen' : 'Starten'}
+              Starten
+            </button>
+            <button
+              onClick={() => handleControlAction('STOP')}
+              className="btn btn-danger"
+              disabled={!isRunning}
+            >
+              Stoppen
             </button>
             <button
               onClick={() => handleControlAction('RESTART')}
               className="btn btn-warning"
-              disabled={!isRunning || (serverType === 'ARK' && !installed)}
+              disabled={!isRunning}
             >
               Neustart
             </button>
@@ -803,21 +738,14 @@ export default function ServerConsoleClient({
             Konsole
           </div>
           <div className={`tab ${activeTab === 'properties' ? 'active' : ''}`} onClick={() => setActiveTab('properties')}>
-            {serverType === 'ARK' ? 'GameUserSettings.ini' : 'server.properties'}
+            server.properties
           </div>
-          {serverType !== 'ARK' && (
-            <>
-              <div className={`tab ${activeTab === 'plugins' ? 'active' : ''}`} onClick={() => { setActiveTab('plugins'); fetchUploads(); }}>
-                Plugins
-              </div>
-              <div className={`tab ${activeTab === 'files' ? 'active' : ''}`} onClick={() => setActiveTab('files')}>
-                Dateien / Uploads
-              </div>
-              <div className={`tab ${activeTab === 'backups' ? 'active' : ''}`} onClick={() => setActiveTab('backups')}>
-                Backups
-              </div>
-            </>
-          )}
+          <div className={`tab ${activeTab === 'plugins' ? 'active' : ''}`} onClick={() => { setActiveTab('plugins'); fetchUploads(); fetchPlugins(); }}>
+            Plugins ({plugins.length})
+          </div>
+          <div className={`tab ${activeTab === 'backups' ? 'active' : ''}`} onClick={() => setActiveTab('backups')}>
+            Backups
+          </div>
           <div
             className={`tab ${activeTab === 'settings' ? 'active' : ''}`}
             onClick={() => {
@@ -834,29 +762,13 @@ export default function ServerConsoleClient({
               fetchUploads();
             }}
           >
-            {serverType === 'ARK' ? 'Installation / Update' : 'Server updaten'}
+            Server updaten
           </div>
         </div>
 
         {/* Tab Content 1: Console */}
         {activeTab === 'console' && (
           <div>
-            {!installed && serverType === 'ARK' && (
-              <div className="card" style={{ borderLeft: '4px solid var(--warning)', backgroundColor: 'rgba(235, 94, 40, 0.1)', padding: '20px', marginBottom: '16px' }}>
-                <h4 style={{ color: 'var(--warning)', marginBottom: '8px', fontWeight: 700 }}>Ark-Server nicht installiert</h4>
-                <p style={{ fontSize: '0.9rem', marginBottom: '16px', color: 'var(--text-muted)' }}>
-                  Der Ark-Server ist derzeit noch nicht auf dem System installiert. Bitte klicke auf den Button unten, um den Download und die Einrichtung über SteamCMD im Hintergrund zu starten.
-                </p>
-                <button
-                  onClick={() => {
-                    setActiveTab('update');
-                  }}
-                  className="btn btn-warning"
-                >
-                  Zur Installation / Update gehen
-                </button>
-              </div>
-            )}
             <div className="console-box" ref={consoleRef}>
               {logs}
             </div>
@@ -866,11 +778,11 @@ export default function ServerConsoleClient({
                 className="form-input"
                 value={command}
                 onChange={(e) => setCommand(e.target.value)}
-                placeholder={serverType === 'ARK' ? "Befehle über Konsole werden für Ark nicht unterstützt (nutze RCON)." : "Gebe einen Server-Befehl ein (z.B. op Notch, say Hallo)..."}
-                disabled={!isRunning || serverType === 'ARK'}
+                placeholder="Gebe einen Server-Befehl ein (z.B. op Notch, say Hallo)..."
+                disabled={!isRunning}
                 style={{ flex: 1 }}
               />
-              <button type="submit" className="btn btn-primary" disabled={!isRunning || serverType === 'ARK'}>
+              <button type="submit" className="btn btn-primary" disabled={!isRunning}>
                 Senden
               </button>
             </form>
@@ -911,187 +823,234 @@ export default function ServerConsoleClient({
           </div>
         )}
 
-        {/* Tab Content 3: Files & Uploads */}
-        {activeTab === 'files' && (
-          <div>
-            <div className="grid-2">
-              {/* Left Column: Upload Dropzone */}
-              <div>
-                <h3 style={{ color: '#fff', marginBottom: '16px' }}>Datei hochladen</h3>
-                {uploadError && (
-                  <div className="card" style={{ borderLeft: '4px solid var(--danger)', color: 'var(--danger)', marginBottom: '16px' }}>
-                    {uploadError}
-                  </div>
-                )}
-                {uploadSuccess && (
-                  <div className="card" style={{ borderLeft: '4px solid var(--success)', color: 'var(--success)', marginBottom: '16px' }}>
-                    {uploadSuccess}
-                  </div>
-                )}
-
-                <form onSubmit={handleFileUpload} className="card" style={{ display: 'flex', flexDirection: 'column', gap: '16px' }}>
-                  <div 
-                    className={`dropzone ${isFileDragging ? 'dragging' : ''}`}
-                    onClick={() => document.getElementById('file-upload-input')?.click()}
-                    onDragOver={(e) => { e.preventDefault(); setIsFileDragging(true); }}
-                    onDragLeave={() => setIsFileDragging(false)}
-                    onDrop={(e) => {
-                      e.preventDefault();
-                      setIsFileDragging(false);
-                      if (e.dataTransfer.files && e.dataTransfer.files.length > 0) {
-                        setUploadFile(e.dataTransfer.files[0]);
-                      }
-                    }}
-                  >
-                    <svg style={{ width: '40px', height: '40px', margin: '0 auto', opacity: 0.5 }} fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="1.5" d="M7 16a4 4 0 01-.88-7.903A5 5 0 1115.9 6L16 6a5 5 0 011 9.9M15 13l-3-3m0 0l-3 3m3-3v12" />
-                    </svg>
-                    <div className="dropzone-text">
-                      {uploadFile ? uploadFile.name : 'Klicke hier oder ziehe eine Datei hierher'}
-                    </div>
-                  </div>
-                  
-                  <input
-                    type="file"
-                    id="file-upload-input"
-                    onChange={(e) => setUploadFile(e.target.files?.[0] || null)}
-                    style={{ display: 'none' }}
-                    accept={serverType === 'PAPER' ? '.jar' : '.zip'}
-                  />
-
-                  <div style={{ color: 'var(--text-muted)', fontSize: '0.85rem' }}>
-                    {serverType === 'PAPER' ? (
-                      <span>Lade Plugins (z.B. EssentialsX.jar) hoch. Wenn du die server.jar aktualisieren möchtest, lade eine Datei namens &quot;server.jar&quot; oder deine benutzerdefinierte JAR-Datei im Hauptverzeichnis hoch.</span>
-                    ) : (
-                      <span>Lade die CurseForge Server Pack ZIP-Datei hoch. Der Inhalt wird automatisch im Serververzeichnis entpackt.</span>
-                    )}
-                  </div>
-
-                  {uploadProgress !== null && (
-                    <div style={{ width: '100%', display: 'flex', flexDirection: 'column', gap: '4px' }}>
-                      <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: '0.8rem', color: 'var(--text-muted)' }}>
-                        <span>Lade hoch...</span>
-                        <span>{uploadProgress}%</span>
-                      </div>
-                      <div style={{ width: '100%', backgroundColor: 'rgba(255, 255, 255, 0.1)', borderRadius: '4px', height: '8px', overflow: 'hidden' }}>
-                        <div style={{ width: `${uploadProgress}%`, height: '100%', backgroundColor: 'var(--primary)', transition: 'width 0.1s ease-in-out' }} />
-                      </div>
-                    </div>
-                  )}
-
-                  <button type="submit" className="btn btn-primary" disabled={!uploadFile || uploadLoading}>
-                    {uploadLoading ? `Lade hoch... ${uploadProgress !== null ? `${uploadProgress}%` : ''}` : 'Hochladen starten'}
-                  </button>
-                </form>
-              </div>
-
-              {/* Right Column: Files listing (Paper only) */}
-              <div>
-                <h3 style={{ color: '#fff', marginBottom: '16px' }}>
-                  {serverType === 'PAPER' ? 'Installierte Plugins' : 'CurseForge Modpack ZIP'}
-                </h3>
-
-                {serverType === 'PAPER' ? (
-                  pluginsLoading ? (
-                    <div style={{ color: 'var(--text-muted)' }}>Lade Plugins...</div>
-                  ) : plugins.length === 0 ? (
-                    <div className="card" style={{ color: 'var(--text-muted)', textAlign: 'center', padding: '32px' }}>
-                      Keine Plugins hochgeladen.
-                    </div>
-                  ) : (
-                    <div style={{ display: 'flex', flexDirection: 'column', gap: '8px' }}>
-                      {plugins.map((plugin) => (
-                        <div key={plugin} className="card" style={{ padding: '12px 16px', display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 0 }}>
-                          <span style={{ fontFamily: 'monospace', fontWeight: 600 }}>{plugin}</span>
-                          <button
-                            className="btn btn-danger"
-                            onClick={() => handleDeletePlugin(plugin)}
-                            style={{ padding: '4px 8px', fontSize: '0.8rem' }}
-                          >
-                            Löschen
-                          </button>
-                        </div>
-                      ))}
-                    </div>
-                  )
-                ) : (
-                  <div className="card" style={{ color: 'var(--text-muted)' }}>
-                    {jarFile ? (
-                      <p>ZIP-Paket wurde erfolgreich entpackt. Der Server startet über den in der ZIP-Datei enthaltenen Starter (run.sh / run.ps1).</p>
-                    ) : (
-                      <p>Bitte lade oben ein CurseForge Server Pack (.zip) hoch, um den Server zu installieren.</p>
-                    )}
-                  </div>
-                )}
-              </div>
-            </div>
-          </div>
-        )}
-
-        {/* Tab Content: Plugins */}
+        {/* Tab Content 3: PLUGINS OVERHAUL (2 COLUMNS WITH DRAG AND DROP) */}
         {activeTab === 'plugins' && (
           <div>
-            <div className="card">
-              <h3 style={{ color: '#fff', marginBottom: '8px' }}>Global hochgeladene Plugins / Mods</h3>
-              <p style={{ color: 'var(--text-muted)', fontSize: '0.9rem', marginBottom: '24px' }}>
-                Wähle aus den in der globalen Dateiverwaltung hochgeladenen Plugins aus. Sie werden automatisch in den {serverType === 'PAPER' ? 'plugins' : 'mods'}-Ordner dieses Servers kopiert.
-              </p>
+            {pluginSuccessMsg && (
+              <div className="card" style={{ borderLeft: '4px solid var(--success)', color: 'var(--success)', padding: '12px 16px', marginBottom: '16px' }}>
+                {pluginSuccessMsg}
+              </div>
+            )}
+            {pluginErrorMsg && (
+              <div className="card" style={{ borderLeft: '4px solid var(--danger)', color: 'var(--danger)', padding: '12px 16px', marginBottom: '16px' }}>
+                {pluginErrorMsg}
+              </div>
+            )}
 
-              {pluginsLoading ? (
-                <div style={{ color: 'var(--text-muted)' }}>Lade installierte Plugins...</div>
-              ) : globalPlugins.length === 0 ? (
-                <div style={{ color: 'var(--text-muted)', textAlign: 'center', padding: '32px', border: '1px dashed var(--border-color)', borderRadius: 'var(--border-radius)' }}>
-                  Keine globalen Plugins hochgeladen. Lade diese zuerst auf dem Dashboard unter &quot;Dateiverwaltung&quot; hoch.
+            <div style={{ marginBottom: '16px', color: 'var(--text-muted)', fontSize: '0.9rem' }}>
+              💡 Ziehe Plugins per Drag & Drop von der linken Seite auf die rechte Seite, um sie zu aktivieren.
+            </div>
+
+            <div className="grid-2" style={{ alignItems: 'start', minHeight: '520px' }}>
+              {/* LEFT COLUMN: Available Plugins in uploads/minecraft/plugins/ */}
+              <div className="card" style={{ height: '100%', display: 'flex', flexDirection: 'column' }}>
+                <div style={{ borderBottom: '1px solid var(--border-color)', paddingBottom: '12px', marginBottom: '16px' }}>
+                  <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '8px' }}>
+                    <h3 style={{ color: '#fff', fontSize: '1.15rem', fontWeight: 700 }}>
+                      Verfügbare Plugins (Dateisystem)
+                    </h3>
+                    <span className="badge badge-paper">{globalPlugins.length} verfügbar</span>
+                  </div>
+                  <input
+                    type="text"
+                    className="form-input"
+                    style={{ fontSize: '0.85rem', padding: '6px 10px' }}
+                    placeholder="Plugins durchsuchen..."
+                    value={pluginFilter}
+                    onChange={(e) => setPluginFilter(e.target.value)}
+                  />
                 </div>
-              ) : (
-                <div style={{ display: 'flex', flexDirection: 'column', gap: '10px' }}>
-                  {globalPlugins.map((plugin) => {
-                    const isInstalled = plugins.includes(plugin.name);
-                    const isToggling = togglingPluginName === plugin.name;
 
-                    return (
-                      <div
-                        key={plugin.name}
-                        className="card"
-                        style={{
-                          padding: '16px 20px',
-                          display: 'flex',
-                          justifyContent: 'space-between',
-                          alignItems: 'center',
-                          marginBottom: 0,
-                          backgroundColor: 'var(--input-bg)',
-                          borderLeft: isInstalled ? '4px solid var(--success)' : '1px solid var(--border-color)',
-                        }}
-                      >
-                        <div style={{ display: 'flex', flexDirection: 'column', gap: '4px' }}>
-                          <span style={{ fontWeight: 600, color: '#fff', fontSize: '0.95rem' }}>{plugin.name}</span>
-                          <span style={{ fontSize: '0.8rem', color: 'var(--text-muted)' }}>
-                            Größe: {(plugin.size / (1024 * 1024)).toFixed(2)} MB | Hochgeladen: {new Date(plugin.createdAt).toLocaleDateString()}
-                          </span>
-                        </div>
+                {pluginsLoading ? (
+                  <div style={{ color: 'var(--text-muted)', textAlign: 'center', padding: '32px' }}>Lade Plugins...</div>
+                ) : filteredGlobalPlugins.length === 0 ? (
+                  <div style={{ color: 'var(--text-muted)', textAlign: 'center', padding: '32px', border: '1px dashed var(--border-color)', borderRadius: 'var(--border-radius)' }}>
+                    {globalPlugins.length === 0
+                      ? 'Keine globalen Plugins hochgeladen. Lade Plugins zuerst im Dashboard unter "Dateiverwaltung" hoch.'
+                      : 'Keine passenden Plugins gefunden.'}
+                  </div>
+                ) : (
+                  <div style={{ display: 'flex', flexDirection: 'column', gap: '8px', overflowY: 'auto', maxHeight: '550px', paddingRight: '4px' }}>
+                    {filteredGlobalPlugins.map((plugin) => {
+                      const isInstalled = plugins.includes(plugin.name);
+                      const isToggling = togglingPluginName === plugin.name;
+                      const isBeingDragged = draggedPlugin === plugin.name;
 
-                        <div>
-                          <label className="flex-gap" style={{ cursor: isToggling ? 'not-allowed' : 'pointer' }}>
-                            <input
-                              type="checkbox"
-                              checked={isInstalled}
-                              disabled={isToggling}
-                              onChange={() => handleTogglePlugin(plugin.name, isInstalled)}
-                              style={{ width: '18px', height: '18px', cursor: 'pointer' }}
-                            />
-                            <span>{isToggling ? 'Wird verarbeitet...' : (isInstalled ? 'Aktiviert' : 'Deaktiviert')}</span>
-                          </label>
+                      return (
+                        <div
+                          key={plugin.name}
+                          draggable={!isInstalled}
+                          onDragStart={(e) => {
+                            e.dataTransfer.setData('text/plain', plugin.name);
+                            setDraggedPlugin(plugin.name);
+                          }}
+                          onDragEnd={() => setDraggedPlugin(null)}
+                          className="card"
+                          style={{
+                            padding: '12px 14px',
+                            display: 'flex',
+                            justifyContent: 'space-between',
+                            alignItems: 'center',
+                            marginBottom: 0,
+                            backgroundColor: isInstalled ? 'rgba(255, 255, 255, 0.02)' : 'var(--input-bg)',
+                            border: isInstalled ? '1px solid rgba(255, 255, 255, 0.06)' : '1px solid var(--border-color)',
+                            cursor: isInstalled ? 'default' : 'grab',
+                            opacity: isBeingDragged ? 0.4 : isInstalled ? 0.75 : 1,
+                            transition: 'all 0.15s ease',
+                          }}
+                        >
+                          <div style={{ display: 'flex', alignItems: 'center', gap: '10px', flex: 1, marginRight: '10px' }}>
+                            {!isInstalled && (
+                              <span style={{ color: 'var(--text-muted)', cursor: 'grab', fontSize: '1.1rem', userSelect: 'none' }} title="Ziehen zum Aktivieren">
+                                ⠿
+                              </span>
+                            )}
+                            <div style={{ display: 'flex', flexDirection: 'column', gap: '2px', overflow: 'hidden' }}>
+                              <span style={{ fontWeight: 600, color: '#fff', fontSize: '0.9rem', textOverflow: 'ellipsis', overflow: 'hidden', whiteSpace: 'nowrap' }} title={plugin.name}>
+                                {plugin.name}
+                              </span>
+                              {plugin.description && (
+                                <span style={{ fontSize: '0.8rem', color: '#bbb' }}>
+                                  {plugin.description}
+                                </span>
+                              )}
+                              <span style={{ fontSize: '0.75rem', color: 'var(--text-muted)' }}>
+                                {(plugin.size / (1024 * 1024)).toFixed(2)} MB
+                              </span>
+                            </div>
+                          </div>
+
+                          <div>
+                            {isInstalled ? (
+                              <span className="badge" style={{ backgroundColor: 'rgba(46, 196, 182, 0.15)', color: 'var(--success)', border: '1px solid var(--success)', fontSize: '0.75rem' }}>
+                                ✓ Aktiv
+                              </span>
+                            ) : (
+                              <button
+                                type="button"
+                                className="btn btn-primary"
+                                style={{ padding: '4px 10px', fontSize: '0.75rem', whiteSpace: 'nowrap' }}
+                                disabled={isToggling}
+                                onClick={() => handleTogglePlugin(plugin.name, false)}
+                              >
+                                {isToggling ? '...' : '+ Aktivieren'}
+                              </button>
+                            )}
+                          </div>
                         </div>
-                      </div>
-                    );
-                  })}
+                      );
+                    })}
+                  </div>
+                )}
+              </div>
+
+              {/* RIGHT COLUMN: Installed Plugins Dropzone */}
+              <div
+                className="card"
+                onDragOver={(e) => {
+                  e.preventDefault();
+                  e.dataTransfer.dropEffect = 'copy';
+                  setIsDropActive(true);
+                }}
+                onDragLeave={(e) => {
+                  if (!e.currentTarget.contains(e.relatedTarget as Node)) {
+                    setIsDropActive(false);
+                  }
+                }}
+                onDrop={(e) => {
+                  e.preventDefault();
+                  setIsDropActive(false);
+                  const pName = e.dataTransfer.getData('text/plain');
+                  if (pName && !plugins.includes(pName)) {
+                    handleTogglePlugin(pName, false);
+                  }
+                }}
+                style={{
+                  height: '100%',
+                  display: 'flex',
+                  flexDirection: 'column',
+                  border: isDropActive ? '2px dashed var(--primary)' : '1px solid var(--border-color)',
+                  backgroundColor: isDropActive ? 'rgba(56, 189, 248, 0.1)' : 'var(--card-bg)',
+                  transition: 'all 0.2s ease',
+                }}
+              >
+                <div style={{ borderBottom: '1px solid var(--border-color)', paddingBottom: '12px', marginBottom: '16px', display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+                  <div>
+                    <h3 style={{ color: '#fff', fontSize: '1.15rem', fontWeight: 700, marginBottom: '2px' }}>
+                      Installierte Plugins (Server)
+                    </h3>
+                    <span style={{ fontSize: '0.8rem', color: 'var(--text-muted)' }}>
+                      Ordner: <code style={{ color: 'var(--primary)' }}>servers/{serverId}/plugins/</code>
+                    </span>
+                  </div>
+                  <span className="badge" style={{ backgroundColor: 'rgba(46, 196, 182, 0.15)', color: 'var(--success)', border: '1px solid var(--success)' }}>
+                    {plugins.length} aktiv
+                  </span>
                 </div>
-              )}
+
+                {isDropActive && (
+                  <div style={{ padding: '16px', textAlign: 'center', backgroundColor: 'rgba(56, 189, 248, 0.15)', borderRadius: 'var(--border-radius)', marginBottom: '12px', border: '1px solid var(--primary)', color: '#fff', fontWeight: 600 }}>
+                    Plugin hier ablegen zum Aktivieren!
+                  </div>
+                )}
+
+                {pluginsLoading ? (
+                  <div style={{ color: 'var(--text-muted)', textAlign: 'center', padding: '32px' }}>Lade installierte Plugins...</div>
+                ) : plugins.length === 0 ? (
+                  <div style={{ flex: 1, display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', padding: '40px 20px', border: '2px dashed var(--border-color)', borderRadius: 'var(--border-radius)', textAlign: 'center', color: 'var(--text-muted)' }}>
+                    <svg style={{ width: '48px', height: '48px', opacity: 0.4, marginBottom: '12px' }} fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="1.5" d="M19 11H5m14 0a2 2 0 012 2v6a2 2 0 01-2 2H5a2 2 0 01-2-2v-6a2 2 0 012-2m14 0V9a2 2 0 00-2-2M5 11V9a2 2 0 012-2m0 0V5a2 2 0 012-2h6a2 2 0 012 2v2M7 7h10" />
+                    </svg>
+                    <p style={{ fontWeight: 600, color: '#fff', marginBottom: '6px' }}>Keine Plugins auf diesem Server aktiv</p>
+                    <p style={{ fontSize: '0.85rem', maxWidth: '300px' }}>
+                      Ziehe ein Plugin von der linken Spalte hierher, um es sofort in den Server-Ordner zu kopieren.
+                    </p>
+                  </div>
+                ) : (
+                  <div style={{ display: 'flex', flexDirection: 'column', gap: '8px', overflowY: 'auto', maxHeight: '550px', paddingRight: '4px' }}>
+                    {plugins.map((plugin) => {
+                      const isToggling = togglingPluginName === plugin;
+
+                      return (
+                        <div
+                          key={plugin}
+                          className="card"
+                          style={{
+                            padding: '12px 16px',
+                            display: 'flex',
+                            justifyContent: 'space-between',
+                            alignItems: 'center',
+                            marginBottom: 0,
+                            backgroundColor: 'var(--input-bg)',
+                            borderLeft: '4px solid var(--success)',
+                          }}
+                        >
+                          <div style={{ display: 'flex', flexDirection: 'column', gap: '2px', overflow: 'hidden' }}>
+                            <span style={{ fontWeight: 600, color: '#fff', fontSize: '0.9rem', textOverflow: 'ellipsis', overflow: 'hidden', whiteSpace: 'nowrap' }} title={plugin}>
+                              {plugin}
+                            </span>
+                          </div>
+
+                          <button
+                            type="button"
+                            className="btn btn-danger"
+                            style={{ padding: '4px 10px', fontSize: '0.75rem', flexShrink: 0 }}
+                            disabled={isToggling}
+                            onClick={() => handleTogglePlugin(plugin, true)}
+                          >
+                            {isToggling ? '...' : 'Deaktivieren'}
+                          </button>
+                        </div>
+                      );
+                    })}
+                  </div>
+                )}
+              </div>
             </div>
           </div>
         )}
 
-        {/* Tab Content 5: Backups */}
+        {/* Tab Content 4: Backups */}
         {activeTab === 'backups' && (
           <div>
             <div className="card">
@@ -1099,22 +1058,21 @@ export default function ServerConsoleClient({
                 <div>
                   <h3 style={{ color: '#fff', marginBottom: '4px' }}>Welt-Backups</h3>
                   <p style={{ color: 'var(--text-muted)', fontSize: '0.9rem' }}>
-                    Erstelle Backups deiner Minecraft-Welt. Backups können nur erstellt werden, wenn der Server offline ist.
+                    Erstelle und verwalte ZIP-Backups der aktuellen Spielwelt.
                   </p>
                 </div>
                 <button
-                  className="btn btn-primary"
                   onClick={handleCreateBackup}
+                  className="btn btn-primary"
                   disabled={isRunning || backupCreateLoading}
-                  style={{ cursor: isRunning ? 'not-allowed' : 'pointer' }}
                 >
-                  {backupCreateLoading ? 'Erstelle Backup...' : 'Backup erstellen'}
+                  {backupCreateLoading ? 'Erstelle Backup...' : 'Neues Backup erstellen'}
                 </button>
               </div>
 
               {isRunning && (
-                <div style={{ color: 'var(--danger)', fontSize: '0.9rem', marginBottom: '16px', fontWeight: 600 }}>
-                  ⚠️ Der Server muss ausgeschaltet sein, um ein Backup zu erstellen.
+                <div style={{ color: 'var(--warning)', fontSize: '0.85rem', marginBottom: '16px', fontWeight: 600 }}>
+                  ⚠️ Der Server läuft derzeit. Für ein sicheres Backup muss der Server gestoppt werden.
                 </div>
               )}
 
@@ -1129,19 +1087,17 @@ export default function ServerConsoleClient({
                 </div>
               )}
 
-              <h4 style={{ color: '#fff', marginBottom: '16px', fontSize: '1.1rem' }}>Verfügbare Backups</h4>
-              
               {backupsLoading ? (
-                <div style={{ color: 'var(--text-muted)', textAlign: 'center', padding: '24px' }}>Lade Backups...</div>
+                <div style={{ color: 'var(--text-muted)' }}>Lade Backups...</div>
               ) : backups.length === 0 ? (
-                <div className="card" style={{ color: 'var(--text-muted)', textAlign: 'center', padding: '32px', backgroundColor: 'var(--input-bg)' }}>
-                  Keine Backups vorhanden. Stoppe den Server und klicke oben auf &quot;Backup erstellen&quot;.
+                <div style={{ color: 'var(--text-muted)', textAlign: 'center', padding: '32px', border: '1px dashed var(--border-color)', borderRadius: 'var(--border-radius)' }}>
+                  Keine Backups vorhanden.
                 </div>
               ) : (
                 <div style={{ display: 'flex', flexDirection: 'column', gap: '10px' }}>
-                  {backups.map((backup) => (
+                  {backups.map((b) => (
                     <div
-                      key={backup.name}
+                      key={b.name}
                       className="card"
                       style={{
                         padding: '16px 20px',
@@ -1153,23 +1109,25 @@ export default function ServerConsoleClient({
                       }}
                     >
                       <div style={{ display: 'flex', flexDirection: 'column', gap: '4px' }}>
-                        <span style={{ fontWeight: 600, color: '#fff', fontSize: '0.95rem' }}>{backup.name}</span>
+                        <span style={{ fontWeight: 600, color: '#fff', fontSize: '0.95rem' }}>{b.name}</span>
                         <span style={{ fontSize: '0.8rem', color: 'var(--text-muted)' }}>
-                          Größe: {(backup.size / (1024 * 1024)).toFixed(2)} MB | Erstellt am: {new Date(backup.createdAt).toLocaleString()}
+                          Größe: {(b.size / (1024 * 1024)).toFixed(2)} MB | Erstellt: {new Date(b.createdAt).toLocaleString()}
                         </span>
                       </div>
-                      <div className="flex-gap">
-                        <a
-                          href={`/api/servers/${serverId}/backups/download?name=${encodeURIComponent(backup.name)}`}
-                          className="btn btn-success"
-                          style={{ padding: '6px 14px', fontSize: '0.85rem' }}
+
+                      <div style={{ display: 'flex', gap: '10px' }}>
+                        <button
+                          className="btn btn-warning"
+                          style={{ padding: '6px 12px', fontSize: '0.85rem' }}
+                          disabled={isRunning}
+                          onClick={() => handleRestoreBackup(b.name)}
                         >
-                          Herunterladen
-                        </a>
+                          Wiederherstellen
+                        </button>
                         <button
                           className="btn btn-danger"
-                          onClick={() => handleDeleteBackup(backup.name)}
-                          style={{ padding: '6px 14px', fontSize: '0.85rem' }}
+                          style={{ padding: '6px 12px', fontSize: '0.85rem' }}
+                          onClick={() => handleDeleteBackup(b.name)}
                         >
                           Löschen
                         </button>
@@ -1182,25 +1140,24 @@ export default function ServerConsoleClient({
           </div>
         )}
 
-        {/* Tab Content 4: Settings */}
+        {/* Tab Content 5: Settings */}
         {activeTab === 'settings' && (
           <div>
-            <div className="grid-2">
-              {/* Configuration Form */}
-              <form onSubmit={handleSaveSettings} className="card">
-                <h3 style={{ color: '#fff', marginBottom: '20px' }}>Server-Einstellungen</h3>
-                
-                {settingsError && (
-                  <div className="card" style={{ borderLeft: '4px solid var(--danger)', color: 'var(--danger)', padding: '12px 16px', marginBottom: '16px' }}>
-                    {settingsError}
-                  </div>
-                )}
-                {settingsSuccess && (
-                  <div className="card" style={{ borderLeft: '4px solid var(--success)', color: 'var(--success)', padding: '12px 16px', marginBottom: '16px' }}>
-                    {settingsSuccess}
-                  </div>
-                )}
+            <div className="card" style={{ maxWidth: '800px', margin: '0 auto' }}>
+              <h3 style={{ color: '#fff', marginBottom: '16px' }}>Server-Einstellungen</h3>
 
+              {settingsError && (
+                <div className="card" style={{ borderLeft: '4px solid var(--danger)', color: 'var(--danger)', padding: '12px 16px', marginBottom: '16px' }}>
+                  {settingsError}
+                </div>
+              )}
+              {settingsSuccess && (
+                <div className="card" style={{ borderLeft: '4px solid var(--success)', color: 'var(--success)', padding: '12px 16px', marginBottom: '16px' }}>
+                  {settingsSuccess}
+                </div>
+              )}
+
+              <form onSubmit={handleSaveSettings} style={{ display: 'flex', flexDirection: 'column', gap: '16px', marginBottom: '32px' }}>
                 <div className="form-group">
                   <label className="form-label">Server Port</label>
                   <input
@@ -1212,117 +1169,52 @@ export default function ServerConsoleClient({
                   />
                 </div>
 
-                {serverType !== 'ARK' ? (
-                  <div className="grid-2">
-                    <div className="form-group">
-                      <label className="form-label">Minimaler RAM (Java -Xms)</label>
-                      <input
-                        type="text"
-                        className="form-input"
-                        value={memoryMin}
-                        onChange={(e) => setMemoryMin(e.target.value)}
-                        required
-                      />
-                    </div>
-
-                    <div className="form-group">
-                      <label className="form-label">Maximaler RAM (Java -Xmx)</label>
-                      <input
-                        type="text"
-                        className="form-input"
-                        value={memoryMax}
-                        onChange={(e) => setMemoryMax(e.target.value)}
-                        required
-                      />
-                    </div>
+                <div className="grid-2">
+                  <div className="form-group">
+                    <label className="form-label">Minimaler RAM (-Xms)</label>
+                    <input
+                      type="text"
+                      className="form-input"
+                      value={memoryMin}
+                      onChange={(e) => setMemoryMin(e.target.value)}
+                      required
+                    />
                   </div>
-                ) : (
-                  <>
-                    <div className="grid-2">
-                      <div className="form-group">
-                        <label className="form-label">Query Port (Steam-Browser)</label>
-                        <input
-                          type="number"
-                          className="form-input"
-                          value={queryPort}
-                          onChange={(e) => setQueryPort(e.target.value)}
-                          required
-                        />
-                      </div>
-                      <div className="form-group">
-                        <label className="form-label">RCON Port (Admin)</label>
-                        <input
-                          type="number"
-                          className="form-input"
-                          value={rconPort}
-                          onChange={(e) => setRconPort(e.target.value)}
-                          required
-                        />
-                      </div>
-                    </div>
-                    <div className="grid-2">
-                      <div className="form-group">
-                        <label className="form-label">Karte / Map</label>
-                        <input
-                          type="text"
-                          className="form-input"
-                          value={map}
-                          onChange={(e) => setMap(e.target.value)}
-                          required
-                        />
-                      </div>
-                      <div className="form-group">
-                        <label className="form-label">Max. Spieler</label>
-                        <input
-                          type="number"
-                          className="form-input"
-                          value={maxPlayers}
-                          onChange={(e) => setMaxPlayers(e.target.value)}
-                          required
-                        />
-                      </div>
-                    </div>
-                    <div className="grid-2">
-                      <div className="form-group">
-                        <label className="form-label">Server Passwort (Beitritt)</label>
-                        <input
-                          type="text"
-                          className="form-input"
-                          value={serverPassword}
-                          onChange={(e) => setServerPassword(e.target.value)}
-                          placeholder="Freilassen für kein Passwort"
-                        />
-                      </div>
-                      <div className="form-group">
-                        <label className="form-label">Admin Passwort</label>
-                        <input
-                          type="text"
-                          className="form-input"
-                          value={adminPassword}
-                          onChange={(e) => setAdminPassword(e.target.value)}
-                          required
-                        />
-                      </div>
-                    </div>
-                  </>
-                )}
+
+                  <div className="form-group">
+                    <label className="form-label">Maximaler RAM (-Xmx)</label>
+                    <input
+                      type="text"
+                      className="form-input"
+                      value={memoryMax}
+                      onChange={(e) => setMemoryMax(e.target.value)}
+                      required
+                    />
+                  </div>
+                </div>
 
                 {serverType === 'PAPER' && (
                   <div className="form-group">
                     <label className="form-label">Server JAR Dateiname</label>
-                    <select
-                      className="form-select"
-                      value={jarFile}
-                      onChange={(e) => setJarFile(e.target.value)}
-                      required
-                    >
-                      <option value="server.jar">server.jar (Standard)</option>
-                      {jars.map((jar) => (
-                        <option key={jar.name} value={jar.name}>
-                          {jar.name} ({(jar.size / (1024 * 1024)).toFixed(2)} MB)
-                        </option>
-                      ))}
-                    </select>
+                    {jars.length === 0 ? (
+                      <div style={{ color: 'var(--warning)', fontSize: '0.85rem' }}>
+                        Keine JAR-Dateien in der globalen Dateiverwaltung gefunden.
+                      </div>
+                    ) : (
+                      <select
+                        className="form-select"
+                        value={jarFile}
+                        onChange={(e) => setJarFile(e.target.value)}
+                        required
+                      >
+                        <option value="">-- Bitte JAR-Datei auswählen --</option>
+                        {jars.map((jar) => (
+                          <option key={jar.name} value={jar.name}>
+                            {jar.name} {jar.description ? `(${jar.description})` : ''} - ({(jar.size / (1024 * 1024)).toFixed(2)} MB)
+                          </option>
+                        ))}
+                      </select>
+                    )}
                   </div>
                 )}
 
@@ -1339,7 +1231,7 @@ export default function ServerConsoleClient({
                         <option value="">-- ZIP-Datei auswählen --</option>
                         {zips.map((zip) => (
                           <option key={zip.name} value={zip.name}>
-                            {zip.name} ({(zip.size / (1024 * 1024)).toFixed(2)} MB)
+                            {zip.name} {zip.description ? `(${zip.description})` : ''} - ({(zip.size / (1024 * 1024)).toFixed(2)} MB)
                           </option>
                         ))}
                       </select>
@@ -1366,27 +1258,11 @@ export default function ServerConsoleClient({
                           ))
                         )}
                       </select>
-                      <p style={{ color: 'var(--text-muted)', fontSize: '0.8rem', marginTop: '6px' }}>
-                        Wähle das Skript aus, mit dem der Server gestartet wird, sobald du auf &quot;Starten&quot; klickst.
-                      </p>
                     </div>
                   </>
                 )}
 
-                {serverType !== 'ARK' && (
-                  <div className="form-group">
-                    <label className="form-label">OP Ingame Name</label>
-                    <input
-                      type="text"
-                      className="form-input"
-                      value={opPlayer}
-                      onChange={(e) => setOpPlayer(e.target.value)}
-                      placeholder="Wird beim Serverstart automatisch geopt"
-                    />
-                  </div>
-                )}
-
-                <div style={{ display: 'flex', justifyContent: 'flex-end', marginTop: '24px' }}>
+                <div style={{ display: 'flex', justifyContent: 'flex-end', marginTop: '16px' }}>
                   <button type="submit" className="btn btn-success" disabled={settingsLoading}>
                     {settingsLoading ? 'Speichere...' : 'Einstellungen speichern'}
                   </button>
@@ -1394,7 +1270,7 @@ export default function ServerConsoleClient({
               </form>
 
               {serverType === 'CURSEFORGE' && (
-                <div className="card" style={{ display: 'flex', flexDirection: 'column', gap: '16px' }}>
+                <div className="card" style={{ display: 'flex', flexDirection: 'column', gap: '16px', marginTop: '24px' }}>
                   <h3 style={{ color: '#fff' }}>Shell-Skripte ausführen</h3>
                   <p style={{ color: 'var(--text-muted)', fontSize: '0.9rem' }}>
                     Führe Konfigurations- oder Setup-Skripte (wie z. B. <code>modpacksettings.sh</code>) aus dem Server-Verzeichnis aus. Der Server muss gestoppt sein.
@@ -1426,134 +1302,100 @@ export default function ServerConsoleClient({
                           ))
                         )}
                       </select>
-                      {scriptExecuting ? (
-                        <button
-                          type="button"
-                          className="btn btn-danger"
-                          onClick={handleCancelScript}
-                        >
-                          Abbrechen
-                        </button>
-                      ) : (
-                        <button
-                          type="button"
-                          className="btn btn-primary"
-                          onClick={handleExecuteScript}
-                          disabled={isRunning || !selectedShFile}
-                        >
-                          Ausführen
-                        </button>
-                      )}
+                      <button
+                        type="button"
+                        className="btn btn-primary"
+                        onClick={handleExecuteScript}
+                        disabled={isRunning || !selectedShFile || scriptExecuting}
+                      >
+                        {scriptExecuting ? 'Läuft...' : 'Ausführen'}
+                      </button>
                     </div>
                   </div>
 
                   {scriptError && (
-                    <div className="card" style={{ borderLeft: '4px solid var(--danger)', color: 'var(--danger)', margin: 0, padding: '12px' }}>
+                    <div className="card" style={{ borderLeft: '4px solid var(--danger)', color: 'var(--danger)', padding: '12px 16px' }}>
                       {scriptError}
                     </div>
                   )}
 
-                  {(scriptExecuting || scriptLogs) && (
-                    <div style={{ display: 'flex', flexDirection: 'column', gap: '8px', marginTop: '10px' }}>
-                      <div className="flex-between">
-                        <span style={{ fontSize: '0.85rem', color: 'var(--text-muted)' }}>
-                          Status: {scriptExecuting ? (
-                            <span style={{ color: 'var(--warning)', fontWeight: 600 }}>Wird ausgeführt...</span>
-                          ) : scriptOutput ? (
-                            scriptOutput.code === 0 ? (
-                              <span style={{ color: 'var(--success)', fontWeight: 600 }}>Erfolgreich (Code 0)</span>
-                            ) : (
-                              <span style={{ color: 'var(--danger)', fontWeight: 600 }}>Fehlgeschlagen (Code {scriptOutput.code})</span>
-                            )
-                          ) : (
-                            <span style={{ color: 'var(--text-muted)' }}>Bereit</span>
-                          )}
-                        </span>
-                        {!scriptExecuting && (
-                          <button
-                            type="button"
-                            className="btn btn-secondary"
-                            onClick={() => {
-                              setScriptLogs('');
-                              setScriptOutput(null);
-                            }}
-                            style={{ padding: '2px 8px', fontSize: '0.75rem' }}
-                          >
-                            Leeren
-                          </button>
-                        )}
-                      </div>
-                      
-                      <div
-                        style={{
-                          backgroundColor: '#0c0f1d',
-                          border: '1px solid #1e293b',
-                          borderRadius: '6px',
-                          padding: '12px',
-                          fontFamily: 'monospace',
-                          fontSize: '0.8rem',
-                          height: '220px',
-                          overflowY: 'auto',
-                          whiteSpace: 'pre-wrap',
-                          color: '#e2e8f0',
-                        }}
+                  {scriptExecuting && (
+                    <div style={{ display: 'flex', justifyContent: 'flex-end' }}>
+                      <button
+                        type="button"
+                        className="btn btn-danger"
+                        onClick={handleStopScript}
+                        style={{ padding: '6px 12px', fontSize: '0.85rem' }}
                       >
-                        {scriptLogs || <span style={{ color: 'var(--text-muted)' }}>(Keine Ausgabe)</span>}
-                      </div>
+                        Skript abbrechen
+                      </button>
+                    </div>
+                  )}
 
+                  {(scriptExecuting || scriptLogs) && (
+                    <div>
+                      <div className="console-box" style={{ height: '220px', marginBottom: '8px' }}>
+                        {scriptLogs}
+                      </div>
                       {scriptExecuting && (
-                        <form onSubmit={handleSendScriptInput} style={{ display: 'flex', gap: '8px' }}>
+                        <form onSubmit={handleSendScriptInput} className="flex-gap">
                           <input
                             type="text"
                             className="form-input"
                             value={scriptInput}
                             onChange={(e) => setScriptInput(e.target.value)}
-                            placeholder="Eingabe für das Skript (z.B. y, Passwort)..."
-                            style={{ flex: 1, fontSize: '0.85rem', padding: '6px 12px' }}
+                            placeholder="Eingabe für das Skript eingeben (z.B. y, n, Token)..."
+                            style={{ flex: 1 }}
                           />
-                          <button type="submit" className="btn btn-success" style={{ padding: '6px 14px', fontSize: '0.85rem' }}>
+                          <button type="submit" className="btn btn-primary">
                             Senden
                           </button>
                         </form>
                       )}
                     </div>
                   )}
+
+                  {scriptOutput && (
+                    <div style={{ color: scriptOutput.code === 0 ? 'var(--success)' : 'var(--danger)', fontSize: '0.9rem', fontWeight: 600 }}>
+                      Skript beendet mit Code: {scriptOutput.code}
+                    </div>
+                  )}
                 </div>
               )}
 
               {/* Danger Zone */}
-              <div className="card" style={{ border: '1px solid var(--danger)' }}>
-                <h3 style={{ color: 'var(--danger)', marginBottom: '12px' }}>Gefahrenzone</h3>
-                <p style={{ color: 'var(--text-muted)', fontSize: '0.9rem', marginBottom: '24px' }}>
-                  Durch das Löschen des Servers werden alle zugehörigen Daten wie Welten, Plugins und Konfigurationsdateien unwiderruflich vom Server gelöscht.
+              <div style={{ marginTop: '32px', paddingTop: '24px', borderTop: '1px solid var(--border-color)' }}>
+                <h4 style={{ color: 'var(--danger)', marginBottom: '8px', fontWeight: 700 }}>Gefahrenbereich</h4>
+                <p style={{ color: 'var(--text-muted)', fontSize: '0.85rem', marginBottom: '16px' }}>
+                  Das Löschen des Servers entfernt die Konfiguration sowie den gesamten Serverordner unwiderruflich vom System.
                 </p>
                 <button
+                  type="button"
                   className="btn btn-danger"
                   onClick={() => setDeleteModalOpen(true)}
                   disabled={isRunning}
-                  style={{ width: '100%' }}
                 >
-                  {isRunning ? 'Stoppe den Server zum Löschen' : 'Server unwiderruflich löschen'}
+                  Server vollständig löschen
                 </button>
               </div>
             </div>
           </div>
         )}
 
-        {/* Tab Content: Update Server */}
+        {/* Tab Content 6: Server Update */}
         {activeTab === 'update' && (
           <div>
-            {serverType === 'ARK' ? (
-              <form onSubmit={handleServerUpdate} className="card" style={{ maxWidth: '600px', margin: '0 auto' }}>
-                <h3 style={{ color: '#fff', marginBottom: '16px' }}>Ark Server Installation / Update</h3>
+            <div className="grid-2">
+              {/* Left Column: Perform Update */}
+              <form onSubmit={handleServerUpdate} className="card">
+                <h3 style={{ color: '#fff', marginBottom: '16px' }}>Server updaten</h3>
                 <p style={{ color: 'var(--text-muted)', fontSize: '0.9rem', marginBottom: '24px' }}>
-                  Installiert oder aktualisiert die Serverdateien für Ark: Survival Ascended direkt über SteamCMD (App ID: 2430930).
-                  Dies lädt ca. 15-20+ GB an Spieledateien direkt von den Steam-Servern herunter.
+                  Wechsle die Server-Version. Das System erstellt vollautomatisch ein Welt-Backup und verschiebt die aktuelle Version zur Sicherheit nach <code>_old</code>, bevor die neue Version installiert wird.
                 </p>
 
                 {isRunning && (
                   <div style={{ color: 'var(--danger)', fontSize: '0.9rem', marginBottom: '20px', fontWeight: 600 }}>
-                    ⚠️ Stoppe den Server, um die Installation oder ein Update durchzuführen.
+                    ⚠️ Stoppe den Server, um das Update durchzuführen.
                   </div>
                 )}
 
@@ -1569,134 +1411,95 @@ export default function ServerConsoleClient({
                 )}
 
                 <div className="form-group">
-                  <label className="form-label">Installationsstatus</label>
+                  <label className="form-label">Aktuelle Version</label>
                   <div style={{ padding: '10px 14px', backgroundColor: 'rgba(255, 255, 255, 0.05)', borderRadius: 'var(--border-radius)', fontFamily: 'monospace' }}>
-                    {installed ? 'Installiert (Bereit zum Starten)' : 'Nicht installiert (Installation erforderlich)'}
+                    {serverType === 'PAPER' ? (jarFile || 'Nicht konfiguriert') : (curseForgeZip || 'Kein ZIP geladen')}
                   </div>
                 </div>
+
+                {serverType === 'PAPER' ? (
+                  <div className="form-group">
+                    <label className="form-label">Neue JAR-Datei auswählen</label>
+                    <select
+                      className="form-select"
+                      value={targetJar}
+                      onChange={(e) => setTargetJar(e.target.value)}
+                      disabled={isRunning || updateLoading}
+                      required
+                    >
+                      <option value="">-- Bitte JAR-Datei auswählen --</option>
+                      {jars.map((jar) => (
+                        <option key={jar.name} value={jar.name}>
+                          {jar.name} {jar.description ? `(${jar.description})` : ''} - ({(jar.size / (1024 * 1024)).toFixed(2)} MB)
+                        </option>
+                      ))}
+                    </select>
+                  </div>
+                ) : (
+                  <div className="form-group">
+                    <label className="form-label">Neues CurseForge Server Pack (.zip) auswählen</label>
+                    <select
+                      className="form-select"
+                      value={targetZip}
+                      onChange={(e) => setTargetZip(e.target.value)}
+                      disabled={isRunning || updateLoading}
+                      required
+                    >
+                      <option value="">-- Bitte ZIP-Datei auswählen --</option>
+                      {zips.map((zip) => (
+                        <option key={zip.name} value={zip.name}>
+                          {zip.name} {zip.description ? `(${zip.description})` : ''} - ({(zip.size / (1024 * 1024)).toFixed(2)} MB)
+                        </option>
+                      ))}
+                    </select>
+                  </div>
+                )}
 
                 <button type="submit" className="btn btn-primary" style={{ width: '100%', marginTop: '16px' }} disabled={isRunning || updateLoading}>
-                  {updateLoading ? 'SteamCMD läuft im Hintergrund...' : installed ? 'Server aktualisieren (SteamCMD)' : 'Server installieren (SteamCMD)'}
+                  {updateLoading ? 'Update läuft (Backup & Kopieren)...' : 'Update starten'}
                 </button>
               </form>
-            ) : (
-              <div className="grid-2">
-                {/* Left Column: Perform Update */}
-                <form onSubmit={handleServerUpdate} className="card">
-                  <h3 style={{ color: '#fff', marginBottom: '16px' }}>Server updaten</h3>
-                  <p style={{ color: 'var(--text-muted)', fontSize: '0.9rem', marginBottom: '24px' }}>
-                    Wechsle die Server-Version. Das System erstellt vollautomatisch ein Welt-Backup und verschiebt die aktuelle Version zur Sicherheit nach <code>_old</code>, bevor die neue Version installiert wird.
-                  </p>
 
-                  {isRunning && (
-                    <div style={{ color: 'var(--danger)', fontSize: '0.9rem', marginBottom: '20px', fontWeight: 600 }}>
-                      ⚠️ Stoppe den Server, um das Update durchzuführen.
-                    </div>
-                  )}
+              {/* Right Column: Rollback Option */}
+              <div className="card" style={{ display: 'flex', flexDirection: 'column', gap: '16px' }}>
+                <h3 style={{ color: '#fff' }}>Rollback (Zurückrollen)</h3>
+                <p style={{ color: 'var(--text-muted)', fontSize: '0.9rem' }}>
+                  Sollte es nach einem Update Probleme geben, kannst du hier die direkt davor gesicherte Version wiederherstellen. Dadurch wird der aktuelle neue Server gelöscht und der alte Stand exakt so wieder gestartet, wie er vor dem Update war.
+                </p>
 
-                  {updateError && (
-                    <div className="card" style={{ borderLeft: '4px solid var(--danger)', color: 'var(--danger)', padding: '12px 16px', marginBottom: '16px' }}>
-                      {updateError}
-                    </div>
-                  )}
-                  {updateSuccess && (
-                    <div className="card" style={{ borderLeft: '4px solid var(--success)', color: 'var(--success)', padding: '12px 16px', marginBottom: '16px' }}>
-                      {updateSuccess}
-                    </div>
-                  )}
-
-                  <div className="form-group">
-                    <label className="form-label">Aktuelle Version</label>
-                    <div style={{ padding: '10px 14px', backgroundColor: 'rgba(255, 255, 255, 0.05)', borderRadius: 'var(--border-radius)', fontFamily: 'monospace' }}>
-                      {serverType === 'PAPER' ? (jarFile || 'server.jar') : (curseForgeZip || 'Kein ZIP geladen')}
-                    </div>
+                {rollbackError && (
+                  <div className="card" style={{ borderLeft: '4px solid var(--danger)', color: 'var(--danger)', padding: '12px 16px', marginBottom: '16px' }}>
+                    {rollbackError}
                   </div>
+                )}
+                {rollbackSuccess && (
+                  <div className="card" style={{ borderLeft: '4px solid var(--success)', color: 'var(--success)', padding: '12px 16px', marginBottom: '16px' }}>
+                    {rollbackSuccess}
+                  </div>
+                )}
 
-                  {serverType === 'PAPER' ? (
-                    <div className="form-group">
-                      <label className="form-label">Neue JAR-Datei auswählen</label>
-                      <select
-                        className="form-select"
-                        value={targetJar}
-                        onChange={(e) => setTargetJar(e.target.value)}
-                        disabled={isRunning || updateLoading}
-                        required
-                      >
-                        <option value="">-- Bitte JAR-Datei auswählen --</option>
-                        <option value="server.jar">server.jar (Standard)</option>
-                        {jars.map((jar) => (
-                          <option key={jar.name} value={jar.name}>
-                            {jar.name} ({(jar.size / (1024 * 1024)).toFixed(2)} MB)
-                          </option>
-                        ))}
-                      </select>
+                {!rollbackAvailable ? (
+                  <div className="card" style={{ backgroundColor: 'rgba(255, 255, 255, 0.02)', textAlign: 'center', padding: '24px', color: 'var(--text-muted)' }}>
+                    Keine alte Server-Version für Rollback verfügbar.
+                  </div>
+                ) : (
+                  <div style={{ display: 'flex', flexDirection: 'column', gap: '16px' }}>
+                    <div style={{ color: 'var(--warning)', fontWeight: 600, fontSize: '0.9rem' }}>
+                      ⚠️ Eine gesicherte Version vor dem letzten Update wurde gefunden.
                     </div>
-                  ) : (
-                    <div className="form-group">
-                      <label className="form-label">Neues CurseForge Server Pack (.zip) auswählen</label>
-                      <select
-                        className="form-select"
-                        value={targetZip}
-                        onChange={(e) => setTargetZip(e.target.value)}
-                        disabled={isRunning || updateLoading}
-                        required
-                      >
-                        <option value="">-- Bitte ZIP-Datei auswählen --</option>
-                        {zips.map((zip) => (
-                          <option key={zip.name} value={zip.name}>
-                            {zip.name} ({(zip.size / (1024 * 1024)).toFixed(2)} MB)
-                          </option>
-                        ))}
-                      </select>
-                    </div>
-                  )}
-
-                  <button type="submit" className="btn btn-primary" style={{ width: '100%', marginTop: '16px' }} disabled={isRunning || updateLoading}>
-                    {updateLoading ? 'Update läuft (Backup & Kopieren)...' : 'Update starten'}
-                  </button>
-                </form>
-
-                {/* Right Column: Rollback Option */}
-                <div className="card" style={{ display: 'flex', flexDirection: 'column', gap: '16px' }}>
-                  <h3 style={{ color: '#fff' }}>Rollback (Zurückrollen)</h3>
-                  <p style={{ color: 'var(--text-muted)', fontSize: '0.9rem' }}>
-                    Sollte es nach einem Update Probleme geben, kannst du hier die direkt davor gesicherte Version wiederherstellen. Dadurch wird der aktuelle neue Server gelöscht und der alte Stand exakt so wieder gestartet, wie er vor dem Update war.
-                  </p>
-
-                  {rollbackError && (
-                    <div className="card" style={{ borderLeft: '4px solid var(--danger)', color: 'var(--danger)', padding: '12px 16px', marginBottom: '16px' }}>
-                      {rollbackError}
-                    </div>
-                  )}
-                  {rollbackSuccess && (
-                    <div className="card" style={{ borderLeft: '4px solid var(--success)', color: 'var(--success)', padding: '12px 16px', marginBottom: '16px' }}>
-                      {rollbackSuccess}
-                    </div>
-                  )}
-
-                  {!rollbackAvailable ? (
-                    <div className="card" style={{ backgroundColor: 'rgba(255, 255, 255, 0.02)', textAlign: 'center', padding: '24px', color: 'var(--text-muted)' }}>
-                      Keine alte Server-Version für Rollback verfügbar.
-                    </div>
-                  ) : (
-                    <div style={{ display: 'flex', flexDirection: 'column', gap: '16px' }}>
-                      <div style={{ color: 'var(--warning)', fontWeight: 600, fontSize: '0.9rem' }}>
-                        ⚠️ Eine gesicherte Version vor dem letzten Update wurde gefunden.
-                      </div>
-                      <button
-                        type="button"
-                        onClick={handleServerRollback}
-                        className="btn btn-warning"
-                        style={{ width: '100%' }}
-                        disabled={isRunning || rollbackLoading}
-                      >
-                        {rollbackLoading ? 'Führe Rollback aus...' : 'Rollback auf alte Version durchführen'}
-                      </button>
-                    </div>
-                  )}
-                </div>
+                    <button
+                      type="button"
+                      onClick={handleServerRollback}
+                      className="btn btn-warning"
+                      style={{ width: '100%' }}
+                      disabled={isRunning || rollbackLoading}
+                    >
+                      {rollbackLoading ? 'Führe Rollback aus...' : 'Rollback auf alte Version durchführen'}
+                    </button>
+                  </div>
+                )}
               </div>
-            )}
+            </div>
           </div>
         )}
       </main>

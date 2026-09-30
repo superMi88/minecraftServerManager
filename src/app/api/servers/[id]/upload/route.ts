@@ -19,9 +19,6 @@ export async function POST(request: NextRequest, { params }: { params: Params })
     }
 
     const { server, type: serverType } = result;
-    if (serverType === 'ARK') {
-      return NextResponse.json({ success: false, error: 'Uploads werden für Ark-Server nicht über dieses Portal unterstützt. Nutze SteamCMD für Installationen/Updates.' }, { status: 400 });
-    }
 
     const formData = await request.formData();
     const file = formData.get('file') as File | null;
@@ -63,7 +60,7 @@ export async function POST(request: NextRequest, { params }: { params: Params })
         let finalPath = '';
         if (serverType === 'PAPER') {
           const paperServer = server as MinecraftServer;
-          if (filename.toLowerCase() === 'server.jar' || filename === paperServer.jarFile) {
+          if (filename === paperServer.jarFile) {
             finalPath = path.join(serverFolder, filename);
           } else {
             if (!filename.toLowerCase().endsWith('.jar')) {
@@ -106,7 +103,7 @@ export async function POST(request: NextRequest, { params }: { params: Params })
         // Post-processing
         if (serverType === 'PAPER') {
           const paperServer = server as MinecraftServer;
-          if (filename.toLowerCase() === 'server.jar' || filename === paperServer.jarFile) {
+          if (filename === paperServer.jarFile) {
             // Update DB
             await prisma.minecraftServer.update({
               where: { id },
@@ -204,7 +201,7 @@ export async function POST(request: NextRequest, { params }: { params: Params })
       if (serverType === 'PAPER') {
         const paperServer = server as MinecraftServer;
         const filename = file.name;
-        if (filename.toLowerCase() === 'server.jar' || filename === paperServer.jarFile) {
+        if (filename === paperServer.jarFile) {
           const filePath = path.join(serverFolder, filename);
           fs.writeFileSync(filePath, buffer);
           await prisma.minecraftServer.update({

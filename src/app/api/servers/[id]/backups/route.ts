@@ -40,11 +40,6 @@ export async function GET(request: NextRequest, { params }: { params: Params }) 
       return NextResponse.json({ success: false, error: 'Server nicht gefunden.' }, { status: 404 });
     }
 
-    const { type: serverType } = result;
-    if (serverType === 'ARK') {
-      return NextResponse.json({ success: true, backups: [] });
-    }
-
     const serverFolder = getServerFolderPath(id);
     const backupsFolder = path.join(serverFolder, 'backups');
 
@@ -83,11 +78,6 @@ export async function POST(request: NextRequest, { params }: { params: Params })
     const result = await findServer(id);
     if (!result) {
       return NextResponse.json({ success: false, error: 'Server nicht gefunden.' }, { status: 404 });
-    }
-
-    const { type: serverType } = result;
-    if (serverType === 'ARK') {
-      return NextResponse.json({ success: false, error: 'Backups werden für Ark-Server derzeit nicht unterstützt.' }, { status: 400 });
     }
 
     // Check if server is running

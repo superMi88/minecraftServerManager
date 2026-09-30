@@ -198,15 +198,6 @@ export async function startServer(serverId: string) {
     logToFile(folderPath, output);
     console.log(`[${serverType} ${server.name}] ${output.trim()}`);
 
-    // If done loading, run automatic op command if set (Minecraft paper specific)
-    if (serverType === 'PAPER' && (output.includes('Done') || output.includes('Preparing start region'))) {
-      const mcServer = server as MinecraftServer;
-      if (mcServer.opPlayer) {
-        setTimeout(() => {
-          sendCommand(serverId, `op ${mcServer.opPlayer}`);
-        }, 2000);
-      }
-    }
   });
 
   serverProcess.stderr?.on('data', (data) => {
@@ -252,14 +243,11 @@ export async function stopServer(serverId: string) {
               process.kill(pid, 'SIGKILL');
             } catch {}
           });
-          if (processInstance.type === 'ARK') {
-            spawn('pkill', ['-9', '-f', folderPath]);
-          }
         }
       }
       runningServers.delete(serverId);
     }
-  }, running.type === 'ARK' ? 20000 : 12000);
+  }, 12000);
 
   // Monitor process exit to clear force kill timer
   running.process.on('exit', () => {

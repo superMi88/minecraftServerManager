@@ -35,78 +35,74 @@ export async function POST(request: NextRequest) {
       memoryMin,
       memoryMax,
       jarFile,
-      opPlayer,
       curseForgeZip,
-      queryPort,
-      rconPort,
-      maxPlayers,
-      map,
-      serverPassword,
-      adminPassword
     } = body;
 
     if (!name || !type || !port) {
-      return NextResponse.json({ success: false, error: 'Name, Type, and Port are required.' }, { status: 400 });
+      return NextResponse.json({ success: false, error: 'Name, Typ und Port sind erforderlich.' }, { status: 400 });
+    }
+
+    if (type !== 'PAPER' && type !== 'CURSEFORGE') {
+      return NextResponse.json({ success: false, error: 'Ungültiger Server-Typ. Es werden nur Paper und CurseForge unterstützt.' }, { status: 400 });
     }
 
     // Port must be an integer
     const portInt = parseInt(port, 10);
     if (isNaN(portInt)) {
-      return NextResponse.json({ success: false, error: 'Port must be a valid number.' }, { status: 400 });
+      return NextResponse.json({ success: false, error: 'Port muss eine gültige Zahl sein.' }, { status: 400 });
     }
 
-    // Check if name or port is already used across all tables
+    // Check if name is already used
     const nameExistsInPaper = await prisma.minecraftServer.findUnique({ where: { name } });
     const nameExistsInCF = await prisma.curseForgeServer.findUnique({ where: { name } });
-    const nameExistsInArk = await prisma.arkServer.findUnique({ where: { name } });
-    if (nameExistsInPaper || nameExistsInCF || nameExistsInArk) {
-      return NextResponse.json({ success: false, error: 'A server with this name already exists.' }, { status: 400 });
+    if (nameExistsInPaper || nameExistsInCF) {
+      return NextResponse.json({ success: false, error: 'Ein Server mit diesem Namen existiert bereits.' }, { status: 400 });
+    }
+
+    // For PAPER, ensure an uploaded jar is selected and exists
+    if (type === 'PAPER') {
+      if (!jarFile) {
+        return NextResponse.json({ success: false, error: 'Bitte wähle eine hochgeladene Server-JAR-Datei aus.' }, { status: 400 });
+      }
+      const globalJarPath = path.join(process.cwd(), 'uploads', 'minecraft', 'jars', jarFile);
+      if (!fs.existsSync(globalJarPath)) {
+        return NextResponse.json({ success: false, error: `Die ausgewählte JAR-Datei "${jarFile}" wurde im Upload-Verzeichnis nicht gefunden.` }, { status: 400 });
+      }
+    }
+
+    // For CURSEFORGE, if zip is provided, check existence
+    if (type === 'CURSEFORGE' && curseForgeZip) {
+      const globalZipPath = path.join(process.cwd(), 'uploads', 'curseforge', curseForgeZip);
+      if (!fs.existsSync(globalZipPath)) {
+        return NextResponse.json({ success: false, error: `Das ausgewählte Modpack "${curseForgeZip}" wurde im Upload-Verzeichnis nicht gefunden.` }, { status: 400 });
+      }
     }
 
     // Create database entry based on type
-    let newServer: ServerUnion & { type?: 'PAPER' | 'CURSEFORGE' | 'ARK' };
+    let newServer: ServerUnion & { type: 'PAPER' | 'CURSEFORGE' };
     if (type === 'PAPER') {
-      newServer = await prisma.minecraftServer.create({
+      const created = await prisma.minecraftServer.create({
         data: {
           name,
           port: portInt,
           memoryMin: memoryMin || '2048M',
           memoryMax: memoryMax || '6144M',
-          jarFile: jarFile || 'server.jar',
-          opPlayer: opPlayer || null,
+          jarFile: jarFile!,
         },
       });
-      newServer.type = 'PAPER';
-    } else if (type === 'CURSEFORGE') {
-      newServer = await prisma.curseForgeServer.create({
+      newServer = { ...created, type: 'PAPER' };
+    } else {
+      const created = await prisma.curseForgeServer.create({
         data: {
           name,
           port: portInt,
           memoryMin: memoryMin || '2048M',
           memoryMax: memoryMax || '6144M',
           curseForgeZip: curseForgeZip || null,
-          opPlayer: opPlayer || null,
           startScript: 'run.sh',
         },
       });
-      newServer.type = 'CURSEFORGE';
-    } else if (type === 'ARK') {
-      newServer = await prisma.arkServer.create({
-        data: {
-          name,
-          port: portInt,
-          queryPort: queryPort ? parseInt(queryPort, 10) : 27015,
-          rconPort: rconPort ? parseInt(rconPort, 10) : 27020,
-          maxPlayers: maxPlayers ? parseInt(maxPlayers, 10) : 20,
-          map: map || 'TheIsland_WP',
-          serverPassword: serverPassword || null,
-          adminPassword: adminPassword || 'adminpass',
-          installed: false,
-        },
-      });
-      newServer.type = 'ARK';
-    } else {
-      return NextResponse.json({ success: false, error: 'Invalid server type.' }, { status: 400 });
+      newServer = { ...created, type: 'CURSEFORGE' };
     }
 
     // Create directory structure
@@ -123,13 +119,13 @@ export async function POST(request: NextRequest) {
 
     // Copy selected files or extract modpack if selected
     if (type === 'PAPER' && jarFile) {
-      const globalJarPath = path.join(process.cwd(), 'uploads', 'jars', jarFile);
+      const globalJarPath = path.join(process.cwd(), 'uploads', 'minecraft', 'jars', jarFile);
       if (fs.existsSync(globalJarPath)) {
         const destPath = path.join(folderPath, jarFile);
         fs.copyFileSync(globalJarPath, destPath);
       }
     } else if (type === 'CURSEFORGE' && curseForgeZip) {
-      const globalZipPath = path.join(process.cwd(), 'uploads', 'zips', curseForgeZip);
+      const globalZipPath = path.join(process.cwd(), 'uploads', 'curseforge', curseForgeZip);
       if (fs.existsSync(globalZipPath)) {
         try {
           const directory = await unzipper.Open.file(globalZipPath);
@@ -138,7 +134,7 @@ export async function POST(request: NextRequest) {
           if (entries.length > 0) {
             const firstEntryPath = entries[0].path;
             const rootFolder = firstEntryPath.split('/')[0];
-            
+
             let allHaveCommonRoot = true;
             for (const entry of entries) {
               if (!entry.path.startsWith(rootFolder + '/') && entry.path !== rootFolder) {
@@ -152,7 +148,7 @@ export async function POST(request: NextRequest) {
               if (allHaveCommonRoot && relativePath.startsWith(rootFolder + '/')) {
                 relativePath = relativePath.slice(rootFolder.length + 1);
               }
-              
+
               if (!relativePath) continue;
 
               const fullPath = path.join(folderPath, relativePath);
@@ -161,7 +157,7 @@ export async function POST(request: NextRequest) {
                 fs.mkdirSync(fullPath, { recursive: true });
               } else {
                 fs.mkdirSync(path.dirname(fullPath), { recursive: true });
-                
+
                 await new Promise<void>((resolve, reject) => {
                   entry.stream()
                     .pipe(fs.createWriteStream(fullPath))

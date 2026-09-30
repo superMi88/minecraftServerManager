@@ -18,10 +18,6 @@ export async function GET(request: NextRequest, { params }: { params: Params }) 
     }
 
     const { type: serverType } = result;
-    if (serverType === 'ARK') {
-      return NextResponse.json({ success: true, plugins: [] });
-    }
-
     const isPaper = serverType === 'PAPER';
     const folderPath = getServerFolderPath(id);
     const folderName = isPaper ? 'plugins' : 'mods';
@@ -63,10 +59,6 @@ export async function POST(request: NextRequest, { params }: { params: Params })
     }
 
     const { type: serverType } = result;
-    if (serverType === 'ARK') {
-      return NextResponse.json({ success: false, error: 'Plugins/Mods werden für Ark über diesen Endpunkt nicht unterstützt.' }, { status: 400 });
-    }
-
     const isPaper = serverType === 'PAPER';
     const folderPath = getServerFolderPath(id);
     const folderName = isPaper ? 'plugins' : 'mods';
@@ -74,9 +66,9 @@ export async function POST(request: NextRequest, { params }: { params: Params })
     const targetPath = path.join(serverDir, pluginName);
 
     if (selected) {
-      const globalPluginPath = path.join(process.cwd(), 'uploads', 'plugins', pluginName);
+      const globalPluginPath = path.join(process.cwd(), 'uploads', 'minecraft', 'plugins', pluginName);
       if (!fs.existsSync(globalPluginPath)) {
-        return NextResponse.json({ success: false, error: 'Global plugin file not found.' }, { status: 404 });
+        return NextResponse.json({ success: false, error: 'Globales Plugin nicht gefunden.' }, { status: 404 });
       }
 
       if (!fs.existsSync(serverDir)) {
@@ -84,12 +76,12 @@ export async function POST(request: NextRequest, { params }: { params: Params })
       }
 
       fs.copyFileSync(globalPluginPath, targetPath);
-      return NextResponse.json({ success: true, message: `Plugin "${pluginName}" enabled successfully.` });
+      return NextResponse.json({ success: true, message: `Plugin "${pluginName}" erfolgreich aktiviert.` });
     } else {
       if (fs.existsSync(targetPath)) {
         fs.unlinkSync(targetPath);
       }
-      return NextResponse.json({ success: true, message: `Plugin "${pluginName}" disabled successfully.` });
+      return NextResponse.json({ success: true, message: `Plugin "${pluginName}" erfolgreich deaktiviert.` });
     }
   } catch (error) {
     const message = error instanceof Error ? error.message : String(error);
@@ -118,10 +110,6 @@ export async function DELETE(request: NextRequest, { params }: { params: Params 
     }
 
     const { type: serverType } = result;
-    if (serverType === 'ARK') {
-      return NextResponse.json({ success: false, error: 'Plugins/Mods werden für Ark nicht unterstützt.' }, { status: 400 });
-    }
-
     const isPaper = serverType === 'PAPER';
     const folderPath = getServerFolderPath(id);
     const folderName = isPaper ? 'plugins' : 'mods';
@@ -129,9 +117,9 @@ export async function DELETE(request: NextRequest, { params }: { params: Params 
 
     if (fs.existsSync(filePath)) {
       fs.unlinkSync(filePath);
-      return NextResponse.json({ success: true, message: `Plugin "${pluginName}" deleted successfully.` });
+      return NextResponse.json({ success: true, message: `Plugin "${pluginName}" erfolgreich entfernt.` });
     } else {
-      return NextResponse.json({ success: false, error: 'Plugin file not found.' }, { status: 404 });
+      return NextResponse.json({ success: false, error: 'Plugin-Datei nicht gefunden.' }, { status: 404 });
     }
   } catch (error) {
     const message = error instanceof Error ? error.message : String(error);

@@ -14,8 +14,8 @@ model MinecraftServer {
   port             Int      @default(25565)
   memoryMin        String   @default("2048M")
   memoryMax        String   @default("6144M")
-  jarFile          String   @default("server.jar")
-  opPlayer         String?  // OP player name
+  jarFile          String
+  opPlayer         String?  // OP player name (deprecated)
   serverProperties String?  // server.properties content
   createdAt        DateTime @default(now())
   updatedAt        DateTime @updatedAt
@@ -29,25 +29,8 @@ model CurseForgeServer {
   memoryMax        String   @default("6144M")
   curseForgeZip    String?  // Name of uploaded zip file (e.g. modpack.zip)
   startScript      String   @default("run.sh")
-  opPlayer         String?  // OP player name
+  opPlayer         String?  // OP player name (deprecated)
   serverProperties String?  // server.properties content
-  createdAt        DateTime @default(now())
-  updatedAt        DateTime @updatedAt
-}
-
-model ArkServer {
-  id               String   @id @default(uuid())
-  name             String   @unique
-  port             Int      @default(7777)
-  queryPort        Int      @default(27015)
-  rconPort         Int      @default(27020)
-  maxPlayers       Int      @default(20)
-  map              String   @default("TheIsland_WP")
-  serverPassword   String?
-  adminPassword    String   @default("adminpass")
-  installed        Boolean  @default(false)
-  gameUserSettings String?  // GameUserSettings.ini content
-  gameIni          String?  // Game.ini content
   createdAt        DateTime @default(now())
   updatedAt        DateTime @updatedAt
 }
