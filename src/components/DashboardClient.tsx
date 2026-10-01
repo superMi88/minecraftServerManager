@@ -102,7 +102,6 @@ export default function DashboardClient({ user }: { user: User }) {
 
   // CurseForge upload state
   const [zipUploadFile, setZipUploadFile] = useState<File | null>(null);
-  const [zipDescription, setZipDescription] = useState('');
   const [zipUploadLoading, setZipUploadLoading] = useState(false);
   const [zipUploadError, setZipUploadError] = useState<string | null>(null);
   const [zipUploadSuccess, setZipUploadSuccess] = useState<string | null>(null);
@@ -110,22 +109,19 @@ export default function DashboardClient({ user }: { user: User }) {
 
   // Minecraft JAR upload state
   const [jarUploadFile, setJarUploadFile] = useState<File | null>(null);
-  const [jarDescription, setJarDescription] = useState('');
   const [jarUploadLoading, setJarUploadLoading] = useState(false);
   const [jarUploadError, setJarUploadError] = useState<string | null>(null);
   const [jarUploadSuccess, setJarUploadSuccess] = useState<string | null>(null);
   const [jarUploadProgress, setJarUploadProgress] = useState<number | null>(null);
 
-  // Minecraft Plugin upload state (drag-and-drop enabled)
-  const [pluginUploadFile, setPluginUploadFile] = useState<File | null>(null);
-  const [pluginDescription, setPluginDescription] = useState('');
+  // Minecraft Plugin upload state (drag-and-drop auto-upload)
   const [pluginUploadLoading, setPluginUploadLoading] = useState(false);
   const [pluginUploadError, setPluginUploadError] = useState<string | null>(null);
   const [pluginUploadSuccess, setPluginUploadSuccess] = useState<string | null>(null);
   const [pluginUploadProgress, setPluginUploadProgress] = useState<number | null>(null);
   const [isPluginDragging, setIsPluginDragging] = useState(false);
 
-  // Inline editing of descriptions
+  // Inline editing of descriptions (added/edited afterwards)
   const [editingFileKey, setEditingFileKey] = useState<string | null>(null);
   const [editingDescription, setEditingDescription] = useState('');
 
@@ -267,10 +263,9 @@ export default function DashboardClient({ user }: { user: User }) {
     setZipUploadSuccess(null);
     setZipUploadProgress(0);
     try {
-      await uploadInChunks(zipUploadFile, '/api/uploads', setZipUploadProgress, 'curseforge', zipDescription);
+      await uploadInChunks(zipUploadFile, '/api/uploads', setZipUploadProgress, 'curseforge');
       setZipUploadSuccess(`Modpack "${zipUploadFile.name}" erfolgreich in curseforge/ hochgeladen.`);
       setZipUploadFile(null);
-      setZipDescription('');
       fetchUploads();
     } catch (err) {
       console.error(err);
@@ -290,10 +285,9 @@ export default function DashboardClient({ user }: { user: User }) {
     setJarUploadSuccess(null);
     setJarUploadProgress(0);
     try {
-      await uploadInChunks(jarUploadFile, '/api/uploads', setJarUploadProgress, 'jar', jarDescription);
+      await uploadInChunks(jarUploadFile, '/api/uploads', setJarUploadProgress, 'jar');
       setJarUploadSuccess(`JAR-Datei "${jarUploadFile.name}" erfolgreich in minecraft/jars/ hochgeladen.`);
       setJarUploadFile(null);
-      setJarDescription('');
       fetchUploads();
     } catch (err) {
       console.error(err);
@@ -305,18 +299,32 @@ export default function DashboardClient({ user }: { user: User }) {
     }
   };
 
-  const handlePluginUpload = async (e: React.FormEvent) => {
-    e.preventDefault();
-    if (!pluginUploadFile) return;
+  const handlePluginAutoUpload = async (files: FileList | File[]) => {
+    const fileList = Array.from(files);
+    if (fileList.length === 0) return;
+
+    for (const file of fileList) {
+      if (!file.name.toLowerCase().endsWith('.jar')) {
+        setPluginUploadError(`"${file.name}" ist keine gültige .jar-Datei.`);
+        return;
+      }
+    }
+
     setPluginUploadLoading(true);
     setPluginUploadError(null);
     setPluginUploadSuccess(null);
-    setPluginUploadProgress(0);
+
     try {
-      await uploadInChunks(pluginUploadFile, '/api/uploads', setPluginUploadProgress, 'plugin', pluginDescription);
-      setPluginUploadSuccess(`Plugin "${pluginUploadFile.name}" erfolgreich in minecraft/plugins/ hochgeladen.`);
-      setPluginUploadFile(null);
-      setPluginDescription('');
+      for (let i = 0; i < fileList.length; i++) {
+        const file = fileList[i];
+        setPluginUploadProgress(0);
+        await uploadInChunks(file, '/api/uploads', setPluginUploadProgress, 'plugin');
+      }
+      setPluginUploadSuccess(
+        fileList.length === 1
+          ? `Plugin "${fileList[0].name}" erfolgreich hochgeladen!`
+          : `${fileList.length} Plugins erfolgreich hochgeladen!`
+      );
       fetchUploads();
     } catch (err) {
       console.error(err);
@@ -457,43 +465,58 @@ export default function DashboardClient({ user }: { user: User }) {
               </button>
             </div>
           ) : (
-            <div className="grid-3">
+            <div className="server-grid">
               {servers.map((server) => (
-                <Link href={`/servers/${server.id}`} key={server.id} className="card-server">
-                  <div className="server-header">
-                    <div className="server-name-group">
-                      <h3>{server.name}</h3>
-                      <div className="server-badges">
-                        <span className={`status-dot ${server.isRunning ? 'online' : 'offline'}`} />
-                        <span style={{ fontSize: '0.85rem', color: server.isRunning ? 'var(--success)' : 'var(--danger)' }}>
-                          {server.isRunning ? 'Online' : 'Offline'}
-                        </span>
-                        <span className="badge badge-paper">
-                          {server.type === 'PAPER' ? 'Paper (Plugins)' : 'CurseForge'}
+                <div key={server.id} className="card-server">
+                  <Link href={`/servers/${server.id}`} className="server-card-body">
+                    <div className="server-header">
+                      <div className="server-name-group">
+                        <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: '8px' }}>
+                          <h3 title={server.name}>{server.name}</h3>
+                          <span className={`badge ${server.type === 'PAPER' ? 'badge-paper' : 'badge-curseforge'}`}>
+                            {server.type === 'PAPER' ? 'Paper' : 'CurseForge'}
+                          </span>
+                        </div>
+                        <div className="server-badges">
+                          <span className={`status-dot ${server.isRunning ? 'online' : 'offline'}`} />
+                          <span style={{ fontSize: '0.85rem', fontWeight: 600, color: server.isRunning ? 'var(--success)' : 'var(--danger)' }}>
+                            {server.isRunning ? 'Online' : 'Offline'}
+                          </span>
+                        </div>
+                      </div>
+                    </div>
+
+                    <div className="server-details">
+                      <div className="server-detail-item">
+                        <span className="server-detail-label">Port:</span>
+                        <span className="server-detail-val">{server.port}</span>
+                      </div>
+                      <div className="server-detail-item">
+                        <span className="server-detail-label">RAM:</span>
+                        <span className="server-detail-val">{server.memoryMin} - {server.memoryMax}</span>
+                      </div>
+                      <div className="server-detail-item">
+                        <span className="server-detail-label">{server.type === 'PAPER' ? 'JAR:' : 'Modpack:'}</span>
+                        <span
+                          className="server-detail-val"
+                          style={{
+                            textOverflow: 'ellipsis',
+                            overflow: 'hidden',
+                            whiteSpace: 'nowrap',
+                            maxWidth: '160px',
+                            textAlign: 'right',
+                          }}
+                          title={server.type === 'PAPER' ? (server.jarFile || 'Nicht konfiguriert') : (server.curseForgeZip || 'Kein ZIP')}
+                        >
+                          {server.type === 'PAPER' ? (server.jarFile || 'Nicht konfiguriert') : (server.curseForgeZip || 'Kein ZIP')}
                         </span>
                       </div>
                     </div>
-                  </div>
+                  </Link>
 
-                  <div className="server-details">
-                    <div className="server-detail-item">
-                      <span className="server-detail-label">Port:</span>
-                      <span className="server-detail-val">{server.port}</span>
-                    </div>
-                    <div className="server-detail-item">
-                      <span className="server-detail-label">RAM:</span>
-                      <span className="server-detail-val">{server.memoryMin} - {server.memoryMax}</span>
-                    </div>
-                    <div className="server-detail-item">
-                      <span className="server-detail-label">{server.type === 'PAPER' ? 'JAR:' : 'Modpack:'}</span>
-                      <span className="server-detail-val" style={{ textOverflow: 'ellipsis', overflow: 'hidden', whiteSpace: 'nowrap', maxWidth: '150px' }}>
-                        {server.type === 'PAPER' ? (server.jarFile || 'Nicht konfiguriert') : (server.curseForgeZip || 'Kein ZIP')}
-                      </span>
-                    </div>
-                  </div>
-
-                  <div className="server-actions" onClick={(e) => e.stopPropagation()}>
+                  <div className="server-actions">
                     <button
+                      type="button"
                       className={`btn ${server.isRunning ? 'btn-danger' : 'btn-success'}`}
                       style={{ flex: 1, padding: '8px 12px' }}
                       onClick={(e) => handleServerAction(server.id, server.isRunning, e)}
@@ -514,13 +537,18 @@ export default function DashboardClient({ user }: { user: User }) {
                         </>
                       )}
                     </button>
-                    <button className="btn btn-secondary" style={{ padding: '8px 12px' }}>
+                    <Link
+                      href={`/servers/${server.id}`}
+                      className="btn btn-secondary"
+                      style={{ padding: '8px 12px' }}
+                      title="Server verwalten & Konsole"
+                    >
                       <svg style={{ width: '16px', height: '16px' }} fill="none" stroke="currentColor" viewBox="0 0 24 24">
                         <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M12 6V4m0 2a2 2 0 100 4m0-4a2 2 0 110 4m-6 8a2 2 0 100-4m0 4a2 2 0 110-4m0 4v2m0-6V4m6 6v10m6-2a2 2 0 100-4m0 4a2 2 0 110-4m0 4v2m0-6V4" />
                       </svg>
-                    </button>
+                    </Link>
                   </div>
-                </Link>
+                </div>
               ))}
             </div>
           )
@@ -582,17 +610,6 @@ export default function DashboardClient({ user }: { user: User }) {
                       className="form-input"
                       accept=".zip"
                       onChange={(e) => setZipUploadFile(e.target.files?.[0] || null)}
-                    />
-                  </div>
-
-                  <div>
-                    <label className="form-label" style={{ marginBottom: '6px' }}>Beschreibung hinzufügen</label>
-                    <input
-                      type="text"
-                      className="form-input"
-                      placeholder="z.B. All The Mods 9 v1.0 Server Pack"
-                      value={zipDescription}
-                      onChange={(e) => setZipDescription(e.target.value)}
                     />
                   </div>
 
@@ -741,17 +758,6 @@ export default function DashboardClient({ user }: { user: User }) {
                       />
                     </div>
 
-                    <div>
-                      <label className="form-label" style={{ marginBottom: '6px' }}>Beschreibung hinzufügen</label>
-                      <input
-                        type="text"
-                        className="form-input"
-                        placeholder="z.B. PaperMC 1.21.4 Build 120"
-                        value={jarDescription}
-                        onChange={(e) => setJarDescription(e.target.value)}
-                      />
-                    </div>
-
                     {jarUploadProgress !== null && (
                       <div style={{ width: '100%', display: 'flex', flexDirection: 'column', gap: '4px' }}>
                         <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: '0.8rem', color: 'var(--text-muted)' }}>
@@ -883,65 +889,70 @@ export default function DashboardClient({ user }: { user: User }) {
                     </div>
                   )}
 
-                  <form onSubmit={handlePluginUpload} style={{ display: 'flex', flexDirection: 'column', gap: '14px', marginBottom: '24px' }}>
-                    {/* Explicit Drag & Drop zone for plugins only */}
+                  {/* Drag & Drop zone for plugins: instant auto-upload without submit button */}
+                  <div style={{ marginBottom: '24px' }}>
                     <div 
-                      className={`dropzone ${isPluginDragging ? 'dragging' : ''}`}
-                      onClick={() => document.getElementById('plugin-upload-input')?.click()}
-                      onDragOver={(e) => { e.preventDefault(); setIsPluginDragging(true); }}
+                      className={`dropzone ${isPluginDragging ? 'dragging' : ''} ${pluginUploadLoading ? 'dropzone-uploading' : ''}`}
+                      onClick={() => {
+                        if (!pluginUploadLoading) {
+                          document.getElementById('plugin-upload-input')?.click();
+                        }
+                      }}
+                      onDragOver={(e) => {
+                        e.preventDefault();
+                        if (!pluginUploadLoading) setIsPluginDragging(true);
+                      }}
                       onDragLeave={() => setIsPluginDragging(false)}
                       onDrop={(e) => {
                         e.preventDefault();
                         setIsPluginDragging(false);
-                        if (e.dataTransfer.files && e.dataTransfer.files.length > 0) {
-                          setPluginUploadFile(e.dataTransfer.files[0]);
+                        if (!pluginUploadLoading && e.dataTransfer.files && e.dataTransfer.files.length > 0) {
+                          handlePluginAutoUpload(e.dataTransfer.files);
                         }
                       }}
-                      style={{ padding: '24px 16px' }}
                     >
-                      <svg style={{ width: '36px', height: '36px', margin: '0 auto', opacity: 0.6 }} fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="1.5" d="M7 16a4 4 0 01-.88-7.903A5 5 0 1115.9 6L16 6a5 5 0 011 9.9M15 13l-3-3m0 0l-3 3m3-3v12" />
-                      </svg>
-                      <div className="dropzone-text" style={{ fontSize: '0.9rem' }}>
-                        {pluginUploadFile ? pluginUploadFile.name : 'Plugin (.jar) hierher ziehen oder klicken'}
-                      </div>
-                    </div>
-                    
-                    <input
-                      type="file"
-                      id="plugin-upload-input"
-                      onChange={(e) => setPluginUploadFile(e.target.files?.[0] || null)}
-                      style={{ display: 'none' }}
-                      accept=".jar"
-                    />
-
-                    <div>
-                      <label className="form-label" style={{ marginBottom: '6px' }}>Beschreibung hinzufügen</label>
                       <input
-                        type="text"
-                        className="form-input"
-                        placeholder="z.B. EssentialsX 2.20.1 Grundsystem"
-                        value={pluginDescription}
-                        onChange={(e) => setPluginDescription(e.target.value)}
+                        type="file"
+                        id="plugin-upload-input"
+                        onChange={(e) => {
+                          if (e.target.files && e.target.files.length > 0) {
+                            handlePluginAutoUpload(e.target.files);
+                            e.target.value = '';
+                          }
+                        }}
+                        style={{ display: 'none' }}
+                        accept=".jar"
+                        multiple
                       />
+
+                      {pluginUploadLoading ? (
+                        <div style={{ width: '100%', maxWidth: '320px', display: 'flex', flexDirection: 'column', alignItems: 'center', gap: '10px' }}>
+                          <div style={{ display: 'flex', alignItems: 'center', gap: '8px', color: 'var(--primary)', fontWeight: 600, fontSize: '0.95rem' }}>
+                            <svg style={{ width: '20px', height: '20px', animation: 'spin 1s linear infinite' }} fill="none" viewBox="0 0 24 24">
+                              <circle style={{ opacity: 0.25 }} cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4" />
+                              <path style={{ opacity: 0.75 }} fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z" />
+                            </svg>
+                            <span>Lade Plugin hoch... {pluginUploadProgress !== null ? `${pluginUploadProgress}%` : ''}</span>
+                          </div>
+                          <div style={{ width: '100%', backgroundColor: 'rgba(255, 255, 255, 0.1)', borderRadius: '4px', height: '8px', overflow: 'hidden' }}>
+                            <div style={{ width: `${pluginUploadProgress || 0}%`, height: '100%', backgroundColor: 'var(--primary)', transition: 'width 0.15s ease-in-out' }} />
+                          </div>
+                        </div>
+                      ) : (
+                        <>
+                          <svg style={{ width: '40px', height: '40px', margin: '0 auto 8px auto', color: 'var(--primary)', opacity: 0.85 }} fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="1.75" d="M7 16a4 4 0 01-.88-7.903A5 5 0 1115.9 6L16 6a5 5 0 011 9.9M15 13l-3-3m0 0l-3 3m3-3v12" />
+                          </svg>
+                          <div style={{ fontWeight: 600, color: '#fff', fontSize: '1rem', marginBottom: '4px' }}>
+                            Plugin (.jar) hierher ziehen oder klicken
+                          </div>
+                          <div className="dropzone-text" style={{ margin: 0, fontSize: '0.85rem' }}>
+                            Wird sofort automatisch hochgeladen (Mehrfachauswahl möglich)
+                          </div>
+                        </>
+                      )}
                     </div>
-
-                    {pluginUploadProgress !== null && (
-                      <div style={{ width: '100%', display: 'flex', flexDirection: 'column', gap: '4px' }}>
-                        <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: '0.8rem', color: 'var(--text-muted)' }}>
-                          <span>Lade hoch...</span>
-                          <span>{pluginUploadProgress}%</span>
-                        </div>
-                        <div style={{ width: '100%', backgroundColor: 'rgba(255, 255, 255, 0.1)', borderRadius: '4px', height: '8px', overflow: 'hidden' }}>
-                          <div style={{ width: `${pluginUploadProgress}%`, height: '100%', backgroundColor: 'var(--primary)', transition: 'width 0.1s ease-in-out' }} />
-                        </div>
-                      </div>
-                    )}
-
-                    <button type="submit" className="btn btn-primary" disabled={!pluginUploadFile || pluginUploadLoading} style={{ alignSelf: 'flex-start' }}>
-                      {pluginUploadLoading ? `Lade Plugin hoch... ${pluginUploadProgress !== null ? `${pluginUploadProgress}%` : ''}` : 'Plugin hochladen'}
-                    </button>
-                  </form>
+                  </div>
 
                   <h4 style={{ color: '#fff', marginBottom: '12px', fontSize: '1rem', fontWeight: 600 }}>
                     Verfügbare Plugins ({plugins.length})

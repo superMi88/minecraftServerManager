@@ -41,6 +41,11 @@ body {
   overflow-x: hidden;
 }
 
+a {
+  color: inherit;
+  text-decoration: none;
+}
+
 /* Custom Scrollbar */
 ::-webkit-scrollbar {
   width: 8px;
@@ -264,6 +269,12 @@ body {
   box-shadow: 0 0 0 2px rgba(88, 101, 242, 0.2);
 }
 
+.form-select option {
+  background-color: var(--card-bg);
+  color: #fff;
+  padding: 8px;
+}
+
 /* Modal Popup */
 .modal-overlay {
   position: fixed;
@@ -362,7 +373,61 @@ body {
   align-items: center;
 }
 
-/* Server Cards Listing */
+/* Container & Main Layout */
+.container {
+  flex: 1;
+  padding: 32px 24px;
+  max-width: 1200px;
+  width: 100%;
+  margin: 0 auto;
+}
+
+/* Status Indicator Dot */
+.status-dot {
+  width: 10px;
+  height: 10px;
+  border-radius: 50%;
+  display: inline-block;
+  flex-shrink: 0;
+}
+
+.status-dot.online {
+  background-color: var(--success);
+  box-shadow: 0 0 8px rgba(35, 165, 90, 0.6);
+  animation: pulse-online 2s infinite;
+}
+
+.status-dot.offline {
+  background-color: var(--danger);
+  box-shadow: 0 0 4px rgba(218, 55, 60, 0.4);
+}
+
+@keyframes pulse-online {
+  0% {
+    box-shadow: 0 0 0 0 rgba(35, 165, 90, 0.7);
+  }
+  70% {
+    box-shadow: 0 0 0 6px rgba(35, 165, 90, 0);
+  }
+  100% {
+    box-shadow: 0 0 0 0 rgba(35, 165, 90, 0);
+  }
+}
+
+/* Badges */
+.badge-paper {
+  background-color: rgba(88, 101, 242, 0.15);
+  color: #8b99ff;
+  border: 1px solid rgba(88, 101, 242, 0.35);
+}
+
+.badge-curseforge {
+  background-color: rgba(240, 102, 34, 0.15);
+  color: #ff8243;
+  border: 1px solid rgba(240, 102, 34, 0.35);
+}
+
+/* Server Cards Grid & Card */
 .server-grid {
   display: grid;
   grid-template-columns: 1fr;
@@ -381,29 +446,102 @@ body {
   }
 }
 
-.server-card {
+.card-server {
+  background-color: var(--panel-bg);
+  border: 1px solid var(--border-color);
+  border-radius: var(--border-radius);
+  padding: 24px;
   display: flex;
   flex-direction: column;
-  height: 100%;
+  box-shadow: var(--shadow-md);
+  transition: transform var(--transition-speed), border-color var(--transition-speed), box-shadow var(--transition-speed);
+  position: relative;
+  overflow: hidden;
+  text-decoration: none;
+  color: var(--text-main);
 }
 
-.server-card-header {
+.card-server:hover {
+  transform: translateY(-3px);
+  border-color: var(--primary);
+  box-shadow: 0 8px 24px rgba(88, 101, 242, 0.2);
+}
+
+.server-card-body {
+  display: flex;
+  flex-direction: column;
+  text-decoration: none;
+  color: inherit;
+  cursor: pointer;
+  flex: 1;
+}
+
+.server-card-body:hover .server-name-group h3 {
+  color: var(--primary);
+}
+
+.server-header {
   margin-bottom: 16px;
 }
 
-.server-card-meta {
-  color: var(--text-muted);
-  font-size: 0.85rem;
-  margin-bottom: 12px;
-  display: grid;
-  grid-template-columns: auto 1fr;
+.server-name-group {
+  display: flex;
+  flex-direction: column;
   gap: 8px;
 }
 
-.server-card-actions {
-  margin-top: auto;
+.server-name-group h3 {
+  font-size: 1.25rem;
+  font-weight: 700;
+  color: #fff;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  margin: 0;
+  transition: color var(--transition-speed);
+}
+
+.server-badges {
   display: flex;
-  gap: 12px;
+  align-items: center;
+  gap: 8px;
+  flex-wrap: wrap;
+}
+
+.server-details {
+  background-color: var(--input-bg);
+  border: 1px solid rgba(255, 255, 255, 0.05);
+  border-radius: 6px;
+  padding: 12px 14px;
+  margin-bottom: 20px;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.server-detail-item {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  font-size: 0.85rem;
+}
+
+.server-detail-label {
+  color: var(--text-muted);
+  font-weight: 500;
+}
+
+.server-detail-val {
+  color: #fff;
+  font-weight: 600;
+  font-family: monospace;
+}
+
+.server-actions {
+  display: flex;
+  gap: 10px;
+  align-items: center;
+  margin-top: auto;
 }
 
 /* Tabs for Server Settings */
@@ -437,11 +575,16 @@ body {
 .dropzone {
   border: 2px dashed var(--border-color);
   border-radius: var(--border-radius);
-  padding: 32px;
+  padding: 32px 20px;
   text-align: center;
   background-color: var(--input-bg);
   cursor: pointer;
-  transition: border-color var(--transition-speed), background-color var(--transition-speed);
+  transition: border-color var(--transition-speed), background-color var(--transition-speed), transform var(--transition-speed);
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  position: relative;
 }
 
 .dropzone:hover {
@@ -452,11 +595,18 @@ body {
 .dropzone.dragging {
   border-color: var(--primary);
   background-color: rgba(88, 101, 242, 0.15);
-  box-shadow: 0 0 0 2px rgba(88, 101, 242, 0.2);
+  box-shadow: 0 0 0 2px rgba(88, 101, 242, 0.25);
+  transform: scale(1.01);
+}
+
+.dropzone-uploading {
+  border-color: var(--primary);
+  background-color: rgba(88, 101, 242, 0.08);
+  cursor: default;
 }
 
 .dropzone-text {
   color: var(--text-muted);
   margin-top: 12px;
-  font-size: 0.9rem;
+  font-size: 0.95rem;
 }
