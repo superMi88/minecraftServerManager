@@ -100,19 +100,19 @@ export default function DashboardClient({ user }: { user: User }) {
   const [activeDashboardTab, setActiveDashboardTab] = useState<'servers' | 'uploads'>('servers');
   const [fileSubTab, setFileSubTab] = useState<'curseforge' | 'minecraft'>('curseforge');
 
-  // CurseForge upload state
-  const [zipUploadFile, setZipUploadFile] = useState<File | null>(null);
+  // CurseForge upload state (drag-and-drop auto-upload)
   const [zipUploadLoading, setZipUploadLoading] = useState(false);
   const [zipUploadError, setZipUploadError] = useState<string | null>(null);
   const [zipUploadSuccess, setZipUploadSuccess] = useState<string | null>(null);
   const [zipUploadProgress, setZipUploadProgress] = useState<number | null>(null);
+  const [isZipDragging, setIsZipDragging] = useState(false);
 
-  // Minecraft JAR upload state
-  const [jarUploadFile, setJarUploadFile] = useState<File | null>(null);
+  // Minecraft JAR upload state (drag-and-drop auto-upload)
   const [jarUploadLoading, setJarUploadLoading] = useState(false);
   const [jarUploadError, setJarUploadError] = useState<string | null>(null);
   const [jarUploadSuccess, setJarUploadSuccess] = useState<string | null>(null);
   const [jarUploadProgress, setJarUploadProgress] = useState<number | null>(null);
+  const [isJarDragging, setIsJarDragging] = useState(false);
 
   // Minecraft Plugin upload state (drag-and-drop auto-upload)
   const [pluginUploadLoading, setPluginUploadLoading] = useState(false);
@@ -255,17 +255,32 @@ export default function DashboardClient({ user }: { user: User }) {
     }
   };
 
-  const handleZipUpload = async (e: React.FormEvent) => {
-    e.preventDefault();
-    if (!zipUploadFile) return;
+  const handleZipAutoUpload = async (files: FileList | File[]) => {
+    const fileList = Array.from(files);
+    if (fileList.length === 0) return;
+
+    for (const file of fileList) {
+      if (!file.name.toLowerCase().endsWith('.zip')) {
+        setZipUploadError(`"${file.name}" ist keine gültige .zip-Datei.`);
+        return;
+      }
+    }
+
     setZipUploadLoading(true);
     setZipUploadError(null);
     setZipUploadSuccess(null);
-    setZipUploadProgress(0);
+
     try {
-      await uploadInChunks(zipUploadFile, '/api/uploads', setZipUploadProgress, 'curseforge');
-      setZipUploadSuccess(`Modpack "${zipUploadFile.name}" erfolgreich in curseforge/ hochgeladen.`);
-      setZipUploadFile(null);
+      for (let i = 0; i < fileList.length; i++) {
+        const file = fileList[i];
+        setZipUploadProgress(0);
+        await uploadInChunks(file, '/api/uploads', setZipUploadProgress, 'curseforge');
+      }
+      setZipUploadSuccess(
+        fileList.length === 1
+          ? `Server Pack "${fileList[0].name}" erfolgreich hochgeladen!`
+          : `${fileList.length} Server Packs erfolgreich hochgeladen!`
+      );
       fetchUploads();
     } catch (err) {
       console.error(err);
@@ -277,17 +292,32 @@ export default function DashboardClient({ user }: { user: User }) {
     }
   };
 
-  const handleJarUpload = async (e: React.FormEvent) => {
-    e.preventDefault();
-    if (!jarUploadFile) return;
+  const handleJarAutoUpload = async (files: FileList | File[]) => {
+    const fileList = Array.from(files);
+    if (fileList.length === 0) return;
+
+    for (const file of fileList) {
+      if (!file.name.toLowerCase().endsWith('.jar')) {
+        setJarUploadError(`"${file.name}" ist keine gültige .jar-Datei.`);
+        return;
+      }
+    }
+
     setJarUploadLoading(true);
     setJarUploadError(null);
     setJarUploadSuccess(null);
-    setJarUploadProgress(0);
+
     try {
-      await uploadInChunks(jarUploadFile, '/api/uploads', setJarUploadProgress, 'jar');
-      setJarUploadSuccess(`JAR-Datei "${jarUploadFile.name}" erfolgreich in minecraft/jars/ hochgeladen.`);
-      setJarUploadFile(null);
+      for (let i = 0; i < fileList.length; i++) {
+        const file = fileList[i];
+        setJarUploadProgress(0);
+        await uploadInChunks(file, '/api/uploads', setJarUploadProgress, 'jar');
+      }
+      setJarUploadSuccess(
+        fileList.length === 1
+          ? `Server-JAR "${fileList[0].name}" erfolgreich in minecraft/jars/ hochgeladen!`
+          : `${fileList.length} Server-JARs erfolgreich in minecraft/jars/ hochgeladen!`
+      );
       fetchUploads();
     } catch (err) {
       console.error(err);
@@ -581,9 +611,12 @@ export default function DashboardClient({ user }: { user: User }) {
             {fileSubTab === 'curseforge' && (
               <div className="card" style={{ maxWidth: '900px', margin: '0 auto' }}>
                 <div style={{ borderBottom: '1px solid var(--border-color)', paddingBottom: '16px', marginBottom: '20px' }}>
-                  <h3 style={{ color: '#fff', fontSize: '1.25rem', fontWeight: 700, marginBottom: '6px' }}>
-                    CurseForge Server Packs (.zip)
-                  </h3>
+                  <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
+                    <h3 style={{ color: '#fff', fontSize: '1.25rem', fontWeight: 700, marginBottom: '6px' }}>
+                      CurseForge Server Packs (.zip)
+                    </h3>
+                    <span className="badge badge-curseforge" style={{ fontSize: '0.75rem' }}>Drag & Drop aktiv</span>
+                  </div>
                   <p style={{ color: 'var(--text-muted)', fontSize: '0.9rem' }}>
                     Gespeichert in: <code style={{ color: 'var(--primary)', background: 'rgba(0,0,0,0.3)', padding: '2px 6px', borderRadius: '4px' }}>uploads/curseforge/</code>
                   </p>
@@ -600,35 +633,70 @@ export default function DashboardClient({ user }: { user: User }) {
                   </div>
                 )}
 
-                {/* Regular File Upload Form (No drag-and-drop zone) */}
-                <form onSubmit={handleZipUpload} style={{ display: 'flex', flexDirection: 'column', gap: '14px', marginBottom: '32px', background: 'var(--input-bg)', padding: '20px', borderRadius: 'var(--border-radius)' }}>
-                  <div>
-                    <label className="form-label" style={{ marginBottom: '8px' }}>ZIP-Datei auswählen</label>
+                {/* Drag & Drop zone for CurseForge: instant auto-upload without submit button */}
+                <div style={{ marginBottom: '28px' }}>
+                  <div 
+                    className={`dropzone ${isZipDragging ? 'dragging' : ''} ${zipUploadLoading ? 'dropzone-uploading' : ''}`}
+                    onClick={() => {
+                      if (!zipUploadLoading) {
+                        document.getElementById('cf-zip-input')?.click();
+                      }
+                    }}
+                    onDragOver={(e) => {
+                      e.preventDefault();
+                      if (!zipUploadLoading) setIsZipDragging(true);
+                    }}
+                    onDragLeave={() => setIsZipDragging(false)}
+                    onDrop={(e) => {
+                      e.preventDefault();
+                      setIsZipDragging(false);
+                      if (!zipUploadLoading && e.dataTransfer.files && e.dataTransfer.files.length > 0) {
+                        handleZipAutoUpload(e.dataTransfer.files);
+                      }
+                    }}
+                  >
                     <input
                       type="file"
                       id="cf-zip-input"
-                      className="form-input"
+                      onChange={(e) => {
+                        if (e.target.files && e.target.files.length > 0) {
+                          handleZipAutoUpload(e.target.files);
+                          e.target.value = '';
+                        }
+                      }}
+                      style={{ display: 'none' }}
                       accept=".zip"
-                      onChange={(e) => setZipUploadFile(e.target.files?.[0] || null)}
+                      multiple
                     />
+
+                    {zipUploadLoading ? (
+                      <div style={{ width: '100%', maxWidth: '320px', display: 'flex', flexDirection: 'column', alignItems: 'center', gap: '10px' }}>
+                        <div style={{ display: 'flex', alignItems: 'center', gap: '8px', color: '#ff8243', fontWeight: 600, fontSize: '0.95rem' }}>
+                          <svg style={{ width: '20px', height: '20px', animation: 'spin 1s linear infinite' }} fill="none" viewBox="0 0 24 24">
+                            <circle style={{ opacity: 0.25 }} cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4" />
+                            <path style={{ opacity: 0.75 }} fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z" />
+                          </svg>
+                          <span>Lade Server Pack hoch... {zipUploadProgress !== null ? `${zipUploadProgress}%` : ''}</span>
+                        </div>
+                        <div style={{ width: '100%', backgroundColor: 'rgba(255, 255, 255, 0.1)', borderRadius: '4px', height: '8px', overflow: 'hidden' }}>
+                          <div style={{ width: `${zipUploadProgress || 0}%`, height: '100%', backgroundColor: '#f06622', transition: 'width 0.15s ease-in-out' }} />
+                        </div>
+                      </div>
+                    ) : (
+                      <>
+                        <svg style={{ width: '40px', height: '40px', margin: '0 auto 8px auto', color: '#ff8243', opacity: 0.9 }} fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                          <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="1.75" d="M7 16a4 4 0 01-.88-7.903A5 5 0 1115.9 6L16 6a5 5 0 011 9.9M15 13l-3-3m0 0l-3 3m3-3v12" />
+                        </svg>
+                        <div style={{ fontWeight: 600, color: '#fff', fontSize: '1rem', marginBottom: '4px' }}>
+                          CurseForge Server Pack (.zip) hierher ziehen oder klicken
+                        </div>
+                        <div className="dropzone-text" style={{ margin: 0, fontSize: '0.85rem' }}>
+                          Wird sofort automatisch nach curseforge/ hochgeladen (Mehrfachauswahl möglich)
+                        </div>
+                      </>
+                    )}
                   </div>
-
-                  {zipUploadProgress !== null && (
-                    <div style={{ width: '100%', display: 'flex', flexDirection: 'column', gap: '4px' }}>
-                      <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: '0.8rem', color: 'var(--text-muted)' }}>
-                        <span>Lade hoch...</span>
-                        <span>{zipUploadProgress}%</span>
-                      </div>
-                      <div style={{ width: '100%', backgroundColor: 'rgba(255, 255, 255, 0.1)', borderRadius: '4px', height: '8px', overflow: 'hidden' }}>
-                        <div style={{ width: `${zipUploadProgress}%`, height: '100%', backgroundColor: 'var(--primary)', transition: 'width 0.1s ease-in-out' }} />
-                      </div>
-                    </div>
-                  )}
-
-                  <button type="submit" className="btn btn-primary" disabled={!zipUploadFile || zipUploadLoading} style={{ alignSelf: 'flex-start' }}>
-                    {zipUploadLoading ? `Lade ZIP hoch... ${zipUploadProgress !== null ? `${zipUploadProgress}%` : ''}` : 'Server Pack hochladen'}
-                  </button>
-                </form>
+                </div>
 
                 <h4 style={{ color: '#fff', marginBottom: '16px', fontSize: '1.1rem', fontWeight: 600 }}>
                   Hochgeladene Server Packs ({zips.length})
@@ -728,9 +796,12 @@ export default function DashboardClient({ user }: { user: User }) {
                 {/* 1. Server JARs (No drag and drop) */}
                 <div className="card">
                   <div style={{ borderBottom: '1px solid var(--border-color)', paddingBottom: '12px', marginBottom: '16px' }}>
-                    <h3 style={{ color: '#fff', fontSize: '1.2rem', fontWeight: 700, marginBottom: '4px' }}>
-                      Minecraft Server JARs (.jar)
-                    </h3>
+                    <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
+                      <h3 style={{ color: '#fff', fontSize: '1.2rem', fontWeight: 700, marginBottom: '4px' }}>
+                        Minecraft Server JARs (.jar)
+                      </h3>
+                      <span className="badge badge-paper" style={{ fontSize: '0.75rem' }}>Drag & Drop aktiv</span>
+                    </div>
                     <p style={{ color: 'var(--text-muted)', fontSize: '0.85rem' }}>
                       Gespeichert in: <code style={{ color: 'var(--primary)', background: 'rgba(0,0,0,0.3)', padding: '2px 6px', borderRadius: '4px' }}>uploads/minecraft/jars/</code>
                     </p>
@@ -747,33 +818,70 @@ export default function DashboardClient({ user }: { user: User }) {
                     </div>
                   )}
 
-                  <form onSubmit={handleJarUpload} style={{ display: 'flex', flexDirection: 'column', gap: '12px', marginBottom: '24px', background: 'var(--input-bg)', padding: '16px', borderRadius: 'var(--border-radius)' }}>
-                    <div>
-                      <label className="form-label" style={{ marginBottom: '6px' }}>JAR-Datei auswählen</label>
+                  {/* Drag & Drop zone for Server JARs: instant auto-upload without submit button */}
+                  <div style={{ marginBottom: '24px' }}>
+                    <div 
+                      className={`dropzone ${isJarDragging ? 'dragging' : ''} ${jarUploadLoading ? 'dropzone-uploading' : ''}`}
+                      onClick={() => {
+                        if (!jarUploadLoading) {
+                          document.getElementById('mc-jar-input')?.click();
+                        }
+                      }}
+                      onDragOver={(e) => {
+                        e.preventDefault();
+                        if (!jarUploadLoading) setIsJarDragging(true);
+                      }}
+                      onDragLeave={() => setIsJarDragging(false)}
+                      onDrop={(e) => {
+                        e.preventDefault();
+                        setIsJarDragging(false);
+                        if (!jarUploadLoading && e.dataTransfer.files && e.dataTransfer.files.length > 0) {
+                          handleJarAutoUpload(e.dataTransfer.files);
+                        }
+                      }}
+                    >
                       <input
                         type="file"
-                        className="form-input"
+                        id="mc-jar-input"
+                        onChange={(e) => {
+                          if (e.target.files && e.target.files.length > 0) {
+                            handleJarAutoUpload(e.target.files);
+                            e.target.value = '';
+                          }
+                        }}
+                        style={{ display: 'none' }}
                         accept=".jar"
-                        onChange={(e) => setJarUploadFile(e.target.files?.[0] || null)}
+                        multiple
                       />
+
+                      {jarUploadLoading ? (
+                        <div style={{ width: '100%', maxWidth: '320px', display: 'flex', flexDirection: 'column', alignItems: 'center', gap: '10px' }}>
+                          <div style={{ display: 'flex', alignItems: 'center', gap: '8px', color: 'var(--primary)', fontWeight: 600, fontSize: '0.95rem' }}>
+                            <svg style={{ width: '20px', height: '20px', animation: 'spin 1s linear infinite' }} fill="none" viewBox="0 0 24 24">
+                              <circle style={{ opacity: 0.25 }} cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4" />
+                              <path style={{ opacity: 0.75 }} fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z" />
+                            </svg>
+                            <span>Lade Server-JAR hoch... {jarUploadProgress !== null ? `${jarUploadProgress}%` : ''}</span>
+                          </div>
+                          <div style={{ width: '100%', backgroundColor: 'rgba(255, 255, 255, 0.1)', borderRadius: '4px', height: '8px', overflow: 'hidden' }}>
+                            <div style={{ width: `${jarUploadProgress || 0}%`, height: '100%', backgroundColor: 'var(--primary)', transition: 'width 0.15s ease-in-out' }} />
+                          </div>
+                        </div>
+                      ) : (
+                        <>
+                          <svg style={{ width: '40px', height: '40px', margin: '0 auto 8px auto', color: 'var(--primary)', opacity: 0.85 }} fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="1.75" d="M7 16a4 4 0 01-.88-7.903A5 5 0 1115.9 6L16 6a5 5 0 011 9.9M15 13l-3-3m0 0l-3 3m3-3v12" />
+                          </svg>
+                          <div style={{ fontWeight: 600, color: '#fff', fontSize: '1rem', marginBottom: '4px' }}>
+                            Server-JAR (.jar) hierher ziehen oder klicken
+                          </div>
+                          <div className="dropzone-text" style={{ margin: 0, fontSize: '0.85rem' }}>
+                            Wird sofort automatisch nach minecraft/jars/ hochgeladen (Mehrfachauswahl möglich)
+                          </div>
+                        </>
+                      )}
                     </div>
-
-                    {jarUploadProgress !== null && (
-                      <div style={{ width: '100%', display: 'flex', flexDirection: 'column', gap: '4px' }}>
-                        <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: '0.8rem', color: 'var(--text-muted)' }}>
-                          <span>Lade hoch...</span>
-                          <span>{jarUploadProgress}%</span>
-                        </div>
-                        <div style={{ width: '100%', backgroundColor: 'rgba(255, 255, 255, 0.1)', borderRadius: '4px', height: '8px', overflow: 'hidden' }}>
-                          <div style={{ width: `${jarUploadProgress}%`, height: '100%', backgroundColor: 'var(--primary)', transition: 'width 0.1s ease-in-out' }} />
-                        </div>
-                      </div>
-                    )}
-
-                    <button type="submit" className="btn btn-primary" disabled={!jarUploadFile || jarUploadLoading} style={{ alignSelf: 'flex-start' }}>
-                      {jarUploadLoading ? `Lade hoch... ${jarUploadProgress !== null ? `${jarUploadProgress}%` : ''}` : 'JAR hochladen'}
-                    </button>
-                  </form>
+                  </div>
 
                   <h4 style={{ color: '#fff', marginBottom: '12px', fontSize: '1rem', fontWeight: 600 }}>
                     Hochgeladene Server-JARs ({jars.length})
