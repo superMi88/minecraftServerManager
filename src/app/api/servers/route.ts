@@ -1,7 +1,8 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { prisma } from '@/lib/db';
 import { isServerRunning, getServerFolderPath } from '@/lib/server-manager';
-import { getAllServers, getHandler, ServerUnion } from '@/lib/servers/registry';
+import { findServer, getAllServers, getHandler, ServerUnion } from '@/lib/servers/registry';
+import { migrateServerData } from '@/lib/servers/migrate';
 import fs from 'fs';
 import path from 'path';
 import unzipper from 'unzipper';
@@ -36,6 +37,7 @@ export async function POST(request: NextRequest) {
       memoryMax,
       jarFile,
       curseForgeZip,
+      sourceServerId,
     } = body;
 
     if (!name || !type || !port) {
@@ -169,6 +171,23 @@ export async function POST(request: NextRequest) {
           }
         } catch (err) {
           console.error('Error extracting zip during server creation:', err);
+        }
+      }
+    }
+
+    // Optional: Migrate world, whitelist, ops, server.properties, plugins from an existing server
+    if (sourceServerId) {
+      const sourceExists = await findServer(sourceServerId);
+      if (sourceExists) {
+        try {
+          await migrateServerData({
+            sourceServerId,
+            targetServerId: newServer.id,
+            targetPort: portInt,
+            targetType: type,
+          });
+        } catch (migErr) {
+          console.error('Error migrating server data during creation:', migErr);
         }
       }
     }

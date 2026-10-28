@@ -89,6 +89,7 @@ export default function DashboardClient({ user }: { user: User }) {
   const [memoryMax, setMemoryMax] = useState('6144M');
   const [jarFile, setJarFile] = useState('');
   const [curseForgeZip, setCurseForgeZip] = useState('');
+  const [sourceServerId, setSourceServerId] = useState('');
 
   const [createLoading, setCreateLoading] = useState(false);
   const [createError, setCreateError] = useState<string | null>(null);
@@ -232,6 +233,7 @@ export default function DashboardClient({ user }: { user: User }) {
           memoryMax,
           jarFile: type === 'PAPER' ? jarFile : undefined,
           curseForgeZip: type === 'CURSEFORGE' ? curseForgeZip : undefined,
+          sourceServerId: sourceServerId || undefined,
         }),
       });
       const data = await res.json();
@@ -243,6 +245,7 @@ export default function DashboardClient({ user }: { user: User }) {
         setMemoryMin('2048M');
         setMemoryMax('6144M');
         setCurseForgeZip('');
+        setSourceServerId('');
         fetchServers();
       } else {
         setCreateError(data.error || 'Fehler beim Erstellen des Servers.');
@@ -1283,6 +1286,27 @@ export default function DashboardClient({ user }: { user: User }) {
                       ))}
                     </select>
                   )}
+                </div>
+              )}
+
+              {servers.length > 0 && (
+                <div className="form-group">
+                  <label className="form-label">Welt & Einstellungen von bestehendem Server übernehmen (Optional)</label>
+                  <select
+                    className="form-select"
+                    value={sourceServerId}
+                    onChange={(e) => setSourceServerId(e.target.value)}
+                  >
+                    <option value="">-- Leerer / Neuer Server (Nichts übernehmen) --</option>
+                    {servers.map((srv) => (
+                      <option key={srv.id} value={srv.id}>
+                        {srv.name} ({srv.type === 'PAPER' ? `Paper: ${srv.jarFile || '-'}` : `CurseForge: ${srv.curseForgeZip || '-'}`})
+                      </option>
+                    ))}
+                  </select>
+                  <p style={{ color: 'var(--text-muted)', fontSize: '0.8rem', marginTop: '6px' }}>
+                    Kopiert automatisch Welt, <code>server.properties</code> (Port wird angepasst), <code>whitelist.json</code>, <code>ops.json</code>, Bans{type === 'PAPER' ? ' und Plugins' : ''} vom ausgewählten Server.
+                  </p>
                 </div>
               )}
 
