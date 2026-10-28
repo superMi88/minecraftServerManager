@@ -144,39 +144,33 @@ export default function DashboardClient({ user }: { user: User }) {
     }
   };
 
-  const fetchUploads = async () => {
-    const fetchUploads = useCallback(async () => {
-      try {
-        const res = await fetch('/api/uploads');
-        const data = await res.json();
-        if (res.ok && data.success) {
-          setZips(data.curseforge || data.zips || []);
-          const loadedJars: UploadedFileItem[] = data.minecraft?.jars || data.jars || [];
-          setJars(loadedJars);
-          setPlugins(data.minecraft?.plugins || data.plugins || []);
+          const fetchUploads = useCallback(async () => {
+            try {
+              const res = await fetch('/api/uploads');
+              const data = await res.json();
+              if (res.ok && data.success) {
+                setZips(data.curseforge || data.zips || []);
+                const loadedJars: UploadedFileItem[] = data.minecraft?.jars || data.jars || [];
+                setJars(loadedJars);
+                setPlugins(data.minecraft?.plugins || data.plugins || []);
 
-          // Auto-select first jar if none selected
-          if (loadedJars.length > 0 && !jarFile) {
-            setJarFile(loadedJars[0].name);
-          }
-          setJarFile((prev) => (!prev && loadedJars.length > 0 ? loadedJars[0].name : prev));
+              // Auto-select first jar if none selected
+              setJarFile((prev) => (!prev && loadedJars.length > 0 ? loadedJars[0].name : prev));
+            }
+        } catch (err) {
+          console.error('Failed to fetch uploads:', err);
         }
-      } catch (err) {
-        console.error('Failed to fetch uploads:', err);
-      }
-    };
-  }, []);
+      }, []);
 
-  useEffect(() => {
-    Promise.resolve().then(() => {
-      fetchServers();
-      fetchUploads();
-    });
+    useEffect(() => {
+      Promise.resolve().then(() => {
+        fetchServers();
+        fetchUploads();
+      });
 
-    // Poll servers status every 5 seconds
-    const interval = setInterval(fetchServers, 5000);
-    return () => clearInterval(interval);
-  }, []);
+      // Poll servers status every 5 seconds
+      const interval = setInterval(fetchServers, 5000);
+      return () => clearInterval(interval);
 }, [fetchUploads]);
 
 // Handle server start/stop actions from dashboard
