@@ -2,7 +2,6 @@ import { spawn, exec, ChildProcess } from 'child_process';
 import path from 'path';
 import fs from 'fs';
 import { findServer, getHandler } from './servers/registry';
-import { MinecraftServer } from '@prisma/client';
 
 // Interface for running process tracking
 interface RunningServer {
@@ -241,7 +240,7 @@ export async function stopServer(serverId: string) {
           exec(`pkill -P ${pid}`, () => {
             try {
               process.kill(pid, 'SIGKILL');
-            } catch {}
+            } catch { }
           });
         }
       }
@@ -351,7 +350,7 @@ export async function startScriptProcess(serverId: string, scriptName: string) {
   if (!isWindows) {
     try {
       fs.chmodSync(scriptPath, '755');
-    } catch {}
+    } catch { }
   }
 
   const command = isWindows ? 'bash' : '/bin/bash';
@@ -376,13 +375,13 @@ export async function startScriptProcess(serverId: string, scriptName: string) {
   scriptProcess.stdout?.on('data', (data) => {
     try {
       fs.appendFileSync(logFile, data.toString());
-    } catch {}
+    } catch { }
   });
 
   scriptProcess.stderr?.on('data', (data) => {
     try {
       fs.appendFileSync(logFile, data.toString());
-    } catch {}
+    } catch { }
   });
 
   scriptProcess.on('exit', (code) => {
@@ -390,7 +389,7 @@ export async function startScriptProcess(serverId: string, scriptName: string) {
     scriptObj.exitCode = code;
     try {
       fs.appendFileSync(logFile, `\n[System] Skript beendet mit Code: ${code}\n`);
-    } catch {}
+    } catch { }
   });
 
   return { success: true, message: 'Skript gestartet.' };
@@ -428,13 +427,13 @@ export function stopScriptProcess(serverId: string) {
         running.process.kill('SIGKILL');
       }
     }
-  } catch {}
+  } catch { }
 
   runningScripts.delete(serverId);
   const logFile = getScriptConsoleLogPath(serverId);
   try {
     fs.appendFileSync(logFile, `\n[System] Skript vom Benutzer abgebrochen.\n`);
-  } catch {}
+  } catch { }
 
   return { success: true, message: 'Skript abgebrochen.' };
 }
