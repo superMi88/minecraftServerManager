@@ -25,6 +25,16 @@ interface UploadedFileItem {
   description?: string;
 }
 
+interface OtherServerItem {
+  id: string;
+  name: string;
+  type: 'PAPER' | 'CURSEFORGE';
+  port: number;
+  jarFile?: string | null;
+  curseForgeZip?: string | null;
+  isRunning: boolean;
+}
+
 export default function ServerConsoleClient({
   serverId,
   initialServerName,
@@ -82,9 +92,13 @@ export default function ServerConsoleClient({
   const [zips, setZips] = useState<UploadedFileItem[]>([]);
   const [jars, setJars] = useState<UploadedFileItem[]>([]);
 
-  // Update/Rollback states
-  const [targetJar, setTargetJar] = useState('');
-  const [targetZip, setTargetZip] = useState('');
+  // Update/Migrate & Rollback states
+  const [otherServers, setOtherServers] = useState<OtherServerItem[]>([]);
+  const [sourceServerId, setSourceServerId] = useState('');
+  const [copyWorld, setCopyWorld] = useState(true);
+  const [copyProperties, setCopyProperties] = useState(true);
+  const [copyPlayers, setCopyPlayers] = useState(true);
+  const [copyPlugins, setCopyPlugins] = useState(true);
   const [updateLoading, setUpdateLoading] = useState(false);
   const [updateError, setUpdateError] = useState<string | null>(null);
   const [updateSuccess, setUpdateSuccess] = useState<string | null>(null);
@@ -151,6 +165,19 @@ export default function ServerConsoleClient({
     }
   }, []);
 
+  const fetchOtherServers = useCallback(async () => {
+    try {
+      const res = await fetch('/api/servers');
+      const data = await res.json();
+      if (res.ok && data.success) {
+        const list = (data.servers || []).filter((s: OtherServerItem) => s.id !== serverId);
+        setOtherServers(list);
+      }
+    } catch (err) {
+      console.error('Failed to fetch servers list:', err);
+    }
+  }, [serverId]);
+
   const fetchPlugins = useCallback(async () => {
     setPluginsLoading(true);
     try {
@@ -171,8 +198,9 @@ export default function ServerConsoleClient({
       fetchMetadata();
       fetchUploads();
       fetchPlugins();
+      fetchOtherServers();
     });
-  }, [fetchMetadata, fetchUploads, fetchPlugins]);
+  }, [fetchMetadata, fetchUploads, fetchPlugins, fetchOtherServers]);
 
   const fetchBackups = useCallback(async () => {
     setBackupsLoading(true);
@@ -269,11 +297,14 @@ export default function ServerConsoleClient({
       if (activeTab === 'settings' || activeTab === 'update' || activeTab === 'plugins') {
         fetchUploads();
         fetchPlugins();
+        if (activeTab === 'update') {
+          fetchOtherServers();
+        }
       } else if (activeTab === 'backups') {
         fetchBackups();
       }
     });
-  }, [activeTab, fetchUploads, fetchBackups, fetchPlugins]);
+  }, [activeTab, fetchUploads, fetchBackups, fetchPlugins, fetchOtherServers]);
 
   // Poll Logs / Status
   useEffect(() => {
@@ -440,7 +471,11 @@ export default function ServerConsoleClient({
   const handleServerUpdate = async (e: React.FormEvent) => {
     e.preventDefault();
     if (isRunning) {
-      alert('Der Server muss ausgeschaltet sein, um ein Update durchzuführen.');
+      alert('Dieser Server muss ausgeschaltet sein, um Daten zu übernehmen.');
+      return;
+    }
+    if (!sourceServerId) {
+      setUpdateError('Bitte wähle einen Quell-Server aus.');
       return;
     }
     setUpdateLoading(true);
@@ -451,19 +486,23 @@ export default function ServerConsoleClient({
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
-          targetJar: serverType === 'PAPER' ? targetJar : undefined,
-          targetZip: serverType === 'CURSEFORGE' ? targetZip : undefined,
+          sourceServerId,
+          copyWorld,
+          copyProperties,
+          copyPlayers,
+          copyPlugins: serverType === 'PAPER' ? copyPlugins : false,
         }),
       });
       const data = await res.json();
       if (res.ok && data.success) {
-        setUpdateSuccess(data.message || 'Update erfolgreich durchgeführt.');
+        setUpdateSuccess(data.message || 'Server-Daten erfolgreich übernommen.');
         fetchMetadata();
+        fetchPlugins();
       } else {
-        setUpdateError(data.error || 'Fehler beim Durchführen des Updates.');
+        setUpdateError(data.error || 'Fehler beim Übernehmen der Server-Daten.');
       }
     } catch {
-      setUpdateError('Netzwerkfehler beim Ausführen des Updates.');
+      setUpdateError('Netzwerkfehler beim Übernehmen der Server-Daten.');
     } finally {
       setUpdateLoading(false);
     }
@@ -1382,20 +1421,20 @@ export default function ServerConsoleClient({
           </div>
         )}
 
-        {/* Tab Content 6: Server Update */}
+        {/* Tab Content 6: Server Update / Data Import */}
         {activeTab === 'update' && (
           <div>
             <div className="grid-2">
-              {/* Left Column: Perform Update */}
+              {/* Left Column: Import / Migrate from existing server */}
               <form onSubmit={handleServerUpdate} className="card">
-                <h3 style={{ color: '#fff', marginBottom: '16px' }}>Server updaten</h3>
-                <p style={{ color: 'var(--text-muted)', fontSize: '0.9rem', marginBottom: '24px' }}>
-                  Wechsle die Server-Version. Das System erstellt vollautomatisch ein Welt-Backup und verschiebt die aktuelle Version zur Sicherheit nach <code>_old</code>, bevor die neue Version installiert wird.
+                <h3 style={{ color: '#fff', marginBottom: '12px' }}>Server updaten / Daten von altem Server übernehmen</h3>
+                <p style={{ color: 'var(--text-muted)', fontSize: '0.9rem', marginBottom: '20px' }}>
+                  Wähle deinen bisherigen Server aus, um dessen Welt, Einstellungen und Spielerlisten in diesen Server zu kopieren. Der alte Server bleibt dabei vollständig und unverändert als eigener Server erhalten.
                 </p>
 
                 {isRunning && (
                   <div style={{ color: 'var(--danger)', fontSize: '0.9rem', marginBottom: '20px', fontWeight: 600 }}>
-                    ⚠️ Stoppe den Server, um das Update durchzuführen.
+                    ⚠️ Stoppe diesen Server, bevor du Daten von einem anderen Server importierst.
                   </div>
                 )}
 
@@ -1411,82 +1450,145 @@ export default function ServerConsoleClient({
                 )}
 
                 <div className="form-group">
-                  <label className="form-label">Aktuelle Version</label>
-                  <div style={{ padding: '10px 14px', backgroundColor: 'rgba(255, 255, 255, 0.05)', borderRadius: 'var(--border-radius)', fontFamily: 'monospace' }}>
-                    {serverType === 'PAPER' ? (jarFile || 'Nicht konfiguriert') : (curseForgeZip || 'Kein ZIP geladen')}
+                  <label className="form-label">Ziel-Server (Dieser Server)</label>
+                  <div style={{ padding: '10px 14px', backgroundColor: 'rgba(255, 255, 255, 0.05)', borderRadius: 'var(--border-radius)', fontFamily: 'monospace', fontSize: '0.9rem' }}>
+                    {name} ({serverType === 'PAPER' ? (jarFile || 'Nicht konfiguriert') : (curseForgeZip || 'Kein ZIP geladen')})
                   </div>
                 </div>
 
-                {serverType === 'PAPER' ? (
-                  <div className="form-group">
-                    <label className="form-label">Neue JAR-Datei auswählen</label>
+                <div className="form-group">
+                  <label className="form-label">Alten / Quell-Server auswählen</label>
+                  {otherServers.length === 0 ? (
+                    <div style={{ padding: '12px 14px', borderRadius: 'var(--border-radius)', backgroundColor: 'rgba(255, 255, 255, 0.04)', color: 'var(--text-muted)', fontSize: '0.9rem' }}>
+                      Keine anderen Server gefunden, von denen Daten kopiert werden könnten.
+                    </div>
+                  ) : (
                     <select
                       className="form-select"
-                      value={targetJar}
-                      onChange={(e) => setTargetJar(e.target.value)}
+                      value={sourceServerId}
+                      onChange={(e) => setSourceServerId(e.target.value)}
                       disabled={isRunning || updateLoading}
                       required
                     >
-                      <option value="">-- Bitte JAR-Datei auswählen --</option>
-                      {jars.map((jar) => (
-                        <option key={jar.name} value={jar.name}>
-                          {jar.name} {jar.description ? `(${jar.description})` : ''} - ({(jar.size / (1024 * 1024)).toFixed(2)} MB)
+                      <option value="">-- Bitte Quell-Server auswählen --</option>
+                      {otherServers.map((srv) => (
+                        <option key={srv.id} value={srv.id}>
+                          {srv.name} ({srv.type === 'PAPER' ? `Paper: ${srv.jarFile || '-'}` : `CurseForge: ${srv.curseForgeZip || '-'}`}) {srv.isRunning ? '[Online]' : '[Offline]'}
                         </option>
                       ))}
                     </select>
-                  </div>
-                ) : (
-                  <div className="form-group">
-                    <label className="form-label">Neues CurseForge Server Pack (.zip) auswählen</label>
-                    <select
-                      className="form-select"
-                      value={targetZip}
-                      onChange={(e) => setTargetZip(e.target.value)}
-                      disabled={isRunning || updateLoading}
-                      required
-                    >
-                      <option value="">-- Bitte ZIP-Datei auswählen --</option>
-                      {zips.map((zip) => (
-                        <option key={zip.name} value={zip.name}>
-                          {zip.name} {zip.description ? `(${zip.description})` : ''} - ({(zip.size / (1024 * 1024)).toFixed(2)} MB)
-                        </option>
-                      ))}
-                    </select>
+                  )}
+                </div>
+
+                {sourceServerId && otherServers.find((s) => s.id === sourceServerId)?.isRunning && (
+                  <div style={{ color: 'var(--warning)', fontSize: '0.85rem', marginBottom: '16px' }}>
+                    ⚠️ Hinweis: Der ausgewählte Quell-Server läuft aktuell noch. Für einen sauberen Welt-Export empfiehlt es sich, den Quell-Server vorher kurz zu stoppen.
                   </div>
                 )}
 
-                <button type="submit" className="btn btn-primary" style={{ width: '100%', marginTop: '16px' }} disabled={isRunning || updateLoading}>
-                  {updateLoading ? 'Update läuft (Backup & Kopieren)...' : 'Update starten'}
+                <div className="form-group" style={{ marginTop: '16px' }}>
+                  <label className="form-label" style={{ marginBottom: '10px', display: 'block' }}>Was soll kopiert werden?</label>
+                  <div style={{ display: 'flex', flexDirection: 'column', gap: '10px', padding: '12px 14px', backgroundColor: 'rgba(255, 255, 255, 0.03)', borderRadius: 'var(--border-radius)', border: '1px solid var(--border-color)' }}>
+                    <label style={{ display: 'flex', alignItems: 'center', gap: '10px', cursor: 'pointer', fontSize: '0.9rem' }}>
+                      <input
+                        type="checkbox"
+                        checked={copyWorld}
+                        onChange={(e) => setCopyWorld(e.target.checked)}
+                        disabled={isRunning || updateLoading}
+                      />
+                      <span>
+                        <strong>Welt-Ordner</strong> (<code>world</code>, Nether &amp; End; vorhandene Welt auf diesem Server wird vorher als Backup gesichert)
+                      </span>
+                    </label>
+
+                    <label style={{ display: 'flex', alignItems: 'center', gap: '10px', cursor: 'pointer', fontSize: '0.9rem' }}>
+                      <input
+                        type="checkbox"
+                        checked={copyProperties}
+                        onChange={(e) => setCopyProperties(e.target.checked)}
+                        disabled={isRunning || updateLoading}
+                      />
+                      <span>
+                        <strong>server.properties</strong> (Port bleibt automatisch auf <code>{port}</code> angepasst)
+                      </span>
+                    </label>
+
+                    <label style={{ display: 'flex', alignItems: 'center', gap: '10px', cursor: 'pointer', fontSize: '0.9rem' }}>
+                      <input
+                        type="checkbox"
+                        checked={copyPlayers}
+                        onChange={(e) => setCopyPlayers(e.target.checked)}
+                        disabled={isRunning || updateLoading}
+                      />
+                      <span>
+                        <strong>Whitelist, Ops &amp; Bans</strong> (<code>whitelist.json</code>, <code>ops.json</code>, <code>banned-*.json</code>, <code>usercache.json</code>)
+                      </span>
+                    </label>
+
+                    {serverType === 'PAPER' && (
+                      <label style={{ display: 'flex', alignItems: 'center', gap: '10px', cursor: 'pointer', fontSize: '0.9rem' }}>
+                        <input
+                          type="checkbox"
+                          checked={copyPlugins}
+                          onChange={(e) => setCopyPlugins(e.target.checked)}
+                          disabled={isRunning || updateLoading}
+                        />
+                        <span>
+                          <strong>Plugins</strong> (<code>plugins/</code> Ordner inkl. Konfigurationen)
+                        </span>
+                      </label>
+                    )}
+                  </div>
+                </div>
+
+                <button
+                  type="submit"
+                  className="btn btn-primary"
+                  style={{ width: '100%', marginTop: '16px' }}
+                  disabled={isRunning || updateLoading || otherServers.length === 0 || !sourceServerId}
+                >
+                  {updateLoading ? 'Kopiere Server-Daten...' : 'Daten vom ausgewählten Server übernehmen'}
                 </button>
               </form>
 
-              {/* Right Column: Rollback Option */}
-              <div className="card" style={{ display: 'flex', flexDirection: 'column', gap: '16px' }}>
-                <h3 style={{ color: '#fff' }}>Rollback (Zurückrollen)</h3>
-                <p style={{ color: 'var(--text-muted)', fontSize: '0.9rem' }}>
-                  Sollte es nach einem Update Probleme geben, kannst du hier die direkt davor gesicherte Version wiederherstellen. Dadurch wird der aktuelle neue Server gelöscht und der alte Stand exakt so wieder gestartet, wie er vor dem Update war.
-                </p>
+              {/* Right Column: Info & optional legacy Rollback */}
+              <div style={{ display: 'flex', flexDirection: 'column', gap: '16px' }}>
+                <div className="card" style={{ display: 'flex', flexDirection: 'column', gap: '12px' }}>
+                  <h3 style={{ color: '#fff' }}>So funktioniert das Update über 2 Server</h3>
+                  <ol style={{ color: 'var(--text-muted)', fontSize: '0.9rem', paddingLeft: '20px', display: 'flex', flexDirection: 'column', gap: '8px', lineHeight: 1.5 }}>
+                    <li>
+                      Erstelle im Dashboard einen <strong>neuen Server</strong> mit der neuen Minecraft-JAR oder dem neuen CurseForge-Modpack (oder führe bei CurseForge zuerst das Setup-Skript unter <em>Einstellungen</em> aus).
+                    </li>
+                    <li>
+                      Wähle links deinen <strong>bisherigen Server</strong> aus (oder wähle ihn direkt beim Erstellen des neuen Servers aus).
+                    </li>
+                    <li>
+                      Klicke auf <strong>Daten übernehmen</strong>: Welt, Whitelist, Ops und Properties werden herüberkopiert.
+                    </li>
+                    <li>
+                      Du hast nun <strong>beide Stände als eigene Server</strong> im Dashboard und kannst den neuen Server risikofrei testen.
+                    </li>
+                  </ol>
+                </div>
 
-                {rollbackError && (
-                  <div className="card" style={{ borderLeft: '4px solid var(--danger)', color: 'var(--danger)', padding: '12px 16px', marginBottom: '16px' }}>
-                    {rollbackError}
-                  </div>
-                )}
-                {rollbackSuccess && (
-                  <div className="card" style={{ borderLeft: '4px solid var(--success)', color: 'var(--success)', padding: '12px 16px', marginBottom: '16px' }}>
-                    {rollbackSuccess}
-                  </div>
-                )}
+                {rollbackAvailable && (
+                  <div className="card" style={{ display: 'flex', flexDirection: 'column', gap: '16px' }}>
+                    <h3 style={{ color: '#fff' }}>Legacy-Rollback (Zurückrollen)</h3>
+                    <p style={{ color: 'var(--text-muted)', fontSize: '0.9rem' }}>
+                      Für diesen Server existiert noch eine alte <code>_old</code>-Sicherung von einem früheren In-Place-Update.
+                    </p>
 
-                {!rollbackAvailable ? (
-                  <div className="card" style={{ backgroundColor: 'rgba(255, 255, 255, 0.02)', textAlign: 'center', padding: '24px', color: 'var(--text-muted)' }}>
-                    Keine alte Server-Version für Rollback verfügbar.
-                  </div>
-                ) : (
-                  <div style={{ display: 'flex', flexDirection: 'column', gap: '16px' }}>
-                    <div style={{ color: 'var(--warning)', fontWeight: 600, fontSize: '0.9rem' }}>
-                      ⚠️ Eine gesicherte Version vor dem letzten Update wurde gefunden.
-                    </div>
+                    {rollbackError && (
+                      <div className="card" style={{ borderLeft: '4px solid var(--danger)', color: 'var(--danger)', padding: '12px 16px', marginBottom: '16px' }}>
+                        {rollbackError}
+                      </div>
+                    )}
+                    {rollbackSuccess && (
+                      <div className="card" style={{ borderLeft: '4px solid var(--success)', color: 'var(--success)', padding: '12px 16px', marginBottom: '16px' }}>
+                        {rollbackSuccess}
+                      </div>
+                    )}
+
                     <button
                       type="button"
                       onClick={handleServerRollback}
@@ -1494,7 +1596,7 @@ export default function ServerConsoleClient({
                       style={{ width: '100%' }}
                       disabled={isRunning || rollbackLoading}
                     >
-                      {rollbackLoading ? 'Führe Rollback aus...' : 'Rollback auf alte Version durchführen'}
+                      {rollbackLoading ? 'Führe Rollback aus...' : 'Rollback auf alte _old-Version durchführen'}
                     </button>
                   </div>
                 )}
